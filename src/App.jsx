@@ -50,6 +50,92 @@ async function callAPI(endpoint, payload) {
 const QUALITY_OPTIONS = ["Fully Pyrolyzed Char", "Cookie Dough Char", "Unknown"];
 
 // ============================================================
+// PRODUCTION PERIOD LOOKUP TABLE
+// Each entry: { id, name, color, colorHex, colorGlow, start, end }
+// start/end are [month, day] (1-indexed month)
+// ============================================================
+const PP_COLORS = {
+  Red:    { hex: "#e53e3e", glow: "rgba(229,62,62,0.18)", text: "#fff" },
+  Pink:   { hex: "#ed64a6", glow: "rgba(237,100,166,0.18)", text: "#fff" },
+  Blue:   { hex: "#4299e1", glow: "rgba(66,153,225,0.18)", text: "#fff" },
+  Purple: { hex: "#9f7aea", glow: "rgba(159,122,234,0.18)", text: "#fff" },
+};
+
+const PRODUCTION_PERIODS = [
+  // 2024
+  { id: 123,  name: "2024 PP#1",          color: "Red",    start: "2024-08-12", end: "2024-12-05" },
+  // 2025 numbered PPs
+  { id: 251,  name: "2025 PP#2",          color: "Pink",   start: "2024-12-06", end: "2025-01-31" },
+  { id: 252,  name: "2025 PP#3",          color: "Blue",   start: "2025-02-01", end: "2025-02-28" },
+  { id: 253,  name: "2025 PP#4",          color: "Purple", start: "2025-03-01", end: "2025-03-31" },
+  { id: 254,  name: "2025 PP#5",          color: "Red",    start: "2025-04-01", end: "2025-04-30" },
+  { id: 255,  name: "2025 PP#6",          color: "Pink",   start: "2025-05-01", end: "2025-05-31" },
+  { id: 256,  name: "2025 PP#7",          color: "Blue",   start: "2025-06-01", end: "2025-06-30" },
+  { id: 257,  name: "2025 PP#8",          color: "Purple", start: "2025-07-01", end: "2025-07-31" },
+  { id: 258,  name: "2025 PP#9",          color: "Red",    start: "2025-08-01", end: "2025-08-31" },
+  { id: 259,  name: "2025 PP#10",         color: "Pink",   start: "2025-09-01", end: "2025-09-30" },
+  { id: 2510, name: "2026 PP#11",         color: "Blue",   start: "2025-10-01", end: "2025-10-31" },
+  { id: 2511, name: "November 2025 PP",   color: "Purple", start: "2025-11-01", end: "2025-11-30" },
+  { id: 2512, name: "December 2025 PP",   color: "Red",    start: "2025-12-01", end: "2025-12-31" },
+  // 2026 monthly PPs
+  { id: 2601, name: "January 2026 PP",    color: "Pink",   start: "2026-01-01", end: "2026-01-31" },
+  { id: 2602, name: "February 2026 PP",   color: "Blue",   start: "2026-02-01", end: "2026-02-28" },
+  { id: 2603, name: "March 2026 PP",      color: "Purple", start: "2026-03-01", end: "2026-03-31" },
+  { id: 2604, name: "April 2026 PP",      color: "Red",    start: "2026-04-01", end: "2026-04-30" },
+  { id: 2605, name: "May 2026 PP",        color: "Pink",   start: "2026-05-01", end: "2026-05-31" },
+  { id: 2606, name: "June 2026 PP",       color: "Blue",   start: "2026-06-01", end: "2026-06-30" },
+  { id: 2607, name: "July 2026 PP",       color: "Purple", start: "2026-07-01", end: "2026-07-31" },
+  { id: 2608, name: "August 2026 PP",     color: "Red",    start: "2026-08-01", end: "2026-08-31" },
+  { id: 2609, name: "September 2026 PP",  color: "Pink",   start: "2026-09-01", end: "2026-09-30" },
+  { id: 2610, name: "October 2026 PP",    color: "Blue",   start: "2026-10-01", end: "2026-10-31" },
+  { id: 2611, name: "November 2026 PP",   color: "Purple", start: "2026-11-01", end: "2026-11-30" },
+  { id: 2612, name: "December 2026 PP",   color: "Red",    start: "2026-12-01", end: "2026-12-31" },
+];
+
+function getProductionPeriod(productionDateStr) {
+  if (!productionDateStr) return null;
+  const d = new Date(productionDateStr);
+  if (isNaN(d.getTime())) return null;
+  // Normalize to YYYY-MM-DD for comparison
+  const dateVal = d.getTime();
+  for (const pp of PRODUCTION_PERIODS) {
+    const s = new Date(pp.start + "T00:00:00").getTime();
+    const e = new Date(pp.end + "T23:59:59").getTime();
+    if (dateVal >= s && dateVal <= e) {
+      const colors = PP_COLORS[pp.color];
+      return { ...pp, ...colors };
+    }
+  }
+  return null;
+}
+
+// Production Period Badge component
+function PPBadge({ productionDate, size = "normal" }) {
+  const pp = getProductionPeriod(productionDate);
+  if (!pp) return (
+    <span style={{
+      fontSize: size === "small" ? 9 : 11, color: C.textDim,
+      letterSpacing: 1, fontStyle: "italic",
+    }}>No PP</span>
+  );
+  const isSmall = size === "small";
+  return (
+    <div style={{
+      display: "inline-flex", alignItems: "center", gap: isSmall ? 4 : 6,
+    }}>
+      <div style={{
+        width: isSmall ? 10 : 14, height: isSmall ? 10 : 14, borderRadius: 3,
+        background: pp.hex, boxShadow: `0 0 8px ${pp.glow}`, flexShrink: 0,
+      }} />
+      <span style={{
+        fontSize: isSmall ? 10 : 12, fontWeight: 700, color: pp.hex,
+        letterSpacing: 1, fontFamily: "'JetBrains Mono',monospace",
+      }}>{pp.name}</span>
+    </div>
+  );
+}
+
+// ============================================================
 // SPLASH SCREEN (adapted from D-Series)
 // ============================================================
 function SplashScreen({ onDone }) {
@@ -139,9 +225,11 @@ function ReviewModal({ bagData, isDuplicate, users, onConfirm, onCancel }) {
 
   const canSubmit = reviewed && (!isDuplicate || approver);
 
+  const pp = getProductionPeriod(bagData.production_date);
   const items = [
     { label: "Security Tag", value: bagData.scannedTag },
     { label: "Lot Number", value: bagData.lot_number },
+    pp ? { label: "Production Period", value: pp.name, ppColor: pp.hex } : null,
     { label: "Weight (kg)", value: bagData.quantity_on_hand.toFixed(1), warn: bagData.quantity_on_hand > 180 },
     bagData.reweighKg ? { label: "Re-weigh (kg)", value: bagData.reweighKg } : null,
     { label: "Quality", value: bagData.quality },
@@ -189,7 +277,7 @@ function ReviewModal({ bagData, isDuplicate, users, onConfirm, onCancel }) {
               </span>
               <span style={{
                 fontSize: 13, fontWeight: 600, fontFamily: "'JetBrains Mono',monospace",
-                color: item.warn ? C.warning : item.highlight ? C.warning : C.text,
+                color: item.ppColor ? item.ppColor : item.warn ? C.warning : item.highlight ? C.warning : C.text,
               }}>
                 {item.value}
               </span>
@@ -345,6 +433,7 @@ function AuditScreen({ onPrintReport, users }) {
       prod_code: match.product_code,
       quantity_on_hand: match.quantity_on_hand,
       location: match.location || "Unknown",
+      production_date: match.production_date || null,
       scannedTag: cleanTag,
       timestamp: new Date().toISOString(),
     });
@@ -553,6 +642,18 @@ function AuditScreen({ onPrintReport, users }) {
                 </div>
               </div>
 
+              {/* Production Period */}
+              {currentMatch.production_date && (
+                <div style={{
+                  background: C.bgSection, border: `1px solid ${C.border}`,
+                  borderRadius: 8, padding: "10px 16px", marginBottom: 16,
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
+                }}>
+                  <div style={{ fontSize: 11, color: C.textMuted, letterSpacing: 2 }}>PRODUCTION PERIOD</div>
+                  <PPBadge productionDate={currentMatch.production_date} />
+                </div>
+              )}
+
               {/* Weight Display */}
               <div style={{
                 background: weightWarning ? C.warningGlow : C.bgSection,
@@ -747,6 +848,7 @@ function AuditScreen({ onPrintReport, users }) {
                         {bag.lot_number}
                       </div>
                       <div style={{ fontSize: 12, color: C.textMuted, marginTop: 2 }}>{bag.quality}</div>
+                      {bag.production_date && <div style={{ marginTop: 4 }}><PPBadge productionDate={bag.production_date} size="small" /></div>}
                     </div>
                     <div style={{ textAlign: "right" }}>
                       <div style={{
@@ -846,14 +948,19 @@ function PrintReport({ bags, onBack }) {
       <h2>Generated: ${reportDate} | ${dateRangeText}</h2>
       <h2>Showing: ${filteredBags.length} bags | Reported: ${reported} | Altered: ${altered}</h2>
       <table>
-        <thead><tr><th>#</th><th>Scanned</th><th>Tag</th><th>Lot</th><th>Status</th><th>Weight</th><th>Re-weigh</th><th>Quality</th><th>Location</th><th>Approved By</th><th>Notes</th></tr></thead>
+        <thead><tr><th>#</th><th>Scanned</th><th>Tag</th><th>Lot</th><th>Prod. Period</th><th>Status</th><th>Weight</th><th>Re-weigh</th><th>Quality</th><th>Location</th><th>Approved By</th><th>Notes</th></tr></thead>
         <tbody>
-          ${filteredBags.map((b, i) => `<tr class="${b.status === "altered" ? "altered" : ""}">
+          ${filteredBags.map((b, i) => {
+            const bPP = getProductionPeriod(b.production_date);
+            const ppCell = bPP ? `<span style="color:${bPP.hex};font-weight:700;">&#9632;</span> ${bPP.name}` : "—";
+            return `<tr class="${b.status === "altered" ? "altered" : ""}">
             <td>${i + 1}</td><td>${new Date(b.confirmedAt).toLocaleString()}</td><td>${b.scannedTag}</td><td>${b.lot_number}</td>
+            <td>${ppCell}</td>
             <td>${b.status.toUpperCase()}</td><td>${b.quantity_on_hand.toFixed(1)}</td>
             <td>${b.reweighKg || "—"}</td><td>${b.quality}</td><td>${b.location}</td>
             <td>${b.approvedBy || "—"}</td><td>${b.discrepancy || "—"}</td>
-          </tr>`).join("")}
+          </tr>`;
+          }).join("")}
         </tbody>
       </table>
       <div class="footer">Bio-Char Inventory Audit System v1.1</div>
@@ -1015,12 +1122,19 @@ function PrintReport({ bags, onBack }) {
                     background: C.bgSection,
                     border: `1px solid ${bag.status === "altered" ? C.warning : C.border}`,
                     borderRadius: 8, padding: 14, marginBottom: 8,
-                    borderLeft: `4px solid ${bag.status === "altered" ? C.warning : C.pass}`,
+                    borderLeft: (() => {
+                      const bagPP = getProductionPeriod(bag.production_date);
+                      if (bagPP) return `4px solid ${bagPP.hex}`;
+                      return `4px solid ${bag.status === "altered" ? C.warning : C.pass}`;
+                    })(),
                   }}>
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                      <span style={{ fontSize: 14, fontWeight: 700, color: C.text, fontFamily: "'JetBrains Mono',monospace" }}>
-                        {bag.lot_number}
-                      </span>
+                      <div>
+                        <span style={{ fontSize: 14, fontWeight: 700, color: C.text, fontFamily: "'JetBrains Mono',monospace" }}>
+                          {bag.lot_number}
+                        </span>
+                        {bag.production_date && <div style={{ marginTop: 3 }}><PPBadge productionDate={bag.production_date} size="small" /></div>}
+                      </div>
                       <span style={{
                         fontSize: 10, fontWeight: 700, letterSpacing: 1,
                         color: bag.status === "altered" ? C.warning : C.pass, textTransform: "uppercase",
