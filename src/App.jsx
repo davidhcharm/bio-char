@@ -371,13 +371,6 @@ function AuditScreen({ onPrintReport, users }) {
       return;
     }
 
-    // Search inventory (with fuzzy match)
-    const matches = MOCK_INVENTORY.filter(inv => matchSecurityTag(cleanTag, inv.lot_number));
-
-    if (matches.length === 0) {
-      showNotif("No matching lot found for tag: " + cleanTag, "error");
-      return;
-    }
 
     // Check for duplicates in inventory itself
     const hasInventoryDuplicate = matches.length > 1;
