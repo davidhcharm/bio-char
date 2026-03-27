@@ -61,10 +61,7 @@ const handleScanTag = async () => {
   }
 
   // Call Retool Workflow for lookup
-  const lookupResult = await callAPI("biocharLookup", { 
-    action: "lookup", 
-    payload: { tag: cleanTag } 
-  });
+  const lookupResult = await callAPI("lookupTag", { tag: cleanTag });
   const matches = lookupResult?.data || [];
 
   if (!matches.length) {
@@ -73,10 +70,7 @@ const handleScanTag = async () => {
   }
 
   // Call Retool Workflow for duplicate check
-  const dupResult = await callAPI("biocharLookup", { 
-    action: "checkDuplicate", 
-    payload: { tag: cleanTag } 
-  });
+  const dupResult = await callAPI("checkDuplicate", { tag: cleanTag });
   const dupData = dupResult?.data || [];
   const hasInventoryDuplicate = dupData.length > 0;
 
