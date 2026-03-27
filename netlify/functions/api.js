@@ -17,10 +17,13 @@ exports.handler = async (event) => {
       body: JSON.stringify({ error: `Unknown endpoint: ${endpoint}` }) };
 
     const res = await fetch(WORKFLOW_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, payload }),
-    });
+  method: 'POST',
+  headers: { 
+    'Content-Type': 'application/json',
+    'X-Workflow-Api-Key': process.env.RETOOL_WORKFLOW_KEY,
+  },
+  body: JSON.stringify({ action, payload }),
+});
 
     const data = await res.json();
     return {
