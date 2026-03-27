@@ -47,20 +47,6 @@ async function callAPI(endpoint, payload) {
   }
 }
 
-// ============================================================
-// MOCK MANUFACTURO DATA (demo — would be real API in production)
-// ============================================================
-const MOCK_INVENTORY = [
-  { lot_number: "100234", prod_code: "bio_char", prod_name: "Bio Char", quantity_on_hand: 45.2, location: "Bio Char Storage" },
-  { lot_number: "100235", prod_code: "bio_char", prod_name: "Bio Char", quantity_on_hand: 52.1, location: "Bio Char Storage" },
-  { lot_number: "100236", prod_code: "bio_char", prod_name: "Bio Char", quantity_on_hand: 195.0, location: "Bio Char Storage" },
-  { lot_number: "00237", prod_code: "bio_char", prod_name: "Bio Char", quantity_on_hand: 38.7, location: "Bio Char Storage" },
-  { lot_number: "100238", prod_code: "bio_char", prod_name: "Bio Char", quantity_on_hand: 210.5, location: "Bio Char Storage" },
-  { lot_number: "100239", prod_code: "bio_char", prod_name: "Bio Char", quantity_on_hand: 47.9, location: "Bio Char Storage" },
-  { lot_number: "100240", prod_code: "bio_char", prod_name: "Bio Char", quantity_on_hand: 50.3, location: "Bio Char Storage" },
-  { lot_number: "100234", prod_code: "bio_char", prod_name: "Bio Char", quantity_on_hand: 45.2, location: "Bio Char Storage" }, // duplicate
-];
-
 const QUALITY_OPTIONS = ["Fully Pyrolyzed Char", "Cookie Dough Char", "Unknown"];
 
 // ============================================================
@@ -318,11 +304,11 @@ function AuditScreen({ onPrintReport, users }) {
     setTimeout(() => setNotification(null), 3500);
   };
 
-  const handleScanTag = () => {
+  const handleScanTag = async () => {
     if (!tagInput.trim()) return;
     const cleanTag = tagInput.trim();
 
-    // Check for duplicates in already scanned bags
+    // Check for duplicates in already scanned bags (session-level)
     const isDuplicate = scannedBags.some(b => matchSecurityTag(cleanTag, b.lot_number));
     if (isDuplicate) {
       setDuplicateWarning(true);
@@ -331,27 +317,34 @@ function AuditScreen({ onPrintReport, users }) {
       return;
     }
 
-    // Search inventory (with fuzzy match)
-    const matches = MOCK_INVENTORY.filter(inv => matchSecurityTag(cleanTag, inv.lot_number));
+    // Call Retool Workflow for lookup
+    const lookupResult = await callAPI("lookupTag", { tag: cleanTag });
+    const matches = lookupResult?.data || [];
 
-    if (matches.length === 0) {
+    if (!matches.length) {
       showNotif("No matching lot found for tag: " + cleanTag, "error");
       return;
     }
 
-    // Check for duplicates in inventory itself
-    const hasInventoryDuplicate = matches.length > 1;
+    // Call Retool Workflow for duplicate check
+    const dupResult = await callAPI("checkDuplicate", { tag: cleanTag });
+    const dupData = dupResult?.data || [];
+    const hasInventoryDuplicate = dupData.length > 0;
+
     if (hasInventoryDuplicate) {
       setDuplicateWarning(true);
       setInventoryDuplicate(true);
-      showNotif("⚠ DUPLICATE LOT IN INVENTORY — Authorized approval will be required to submit!", "warning");
+      showNotif("⚠ DUPLICATE LOT IN INVENTORY — Authorized approval required!", "warning");
     } else {
       setInventoryDuplicate(false);
     }
 
     const match = matches[0];
     setCurrentMatch({
-      ...match,
+      lot_number: match.lot_number,
+      prod_code: match.product_code,
+      quantity_on_hand: match.quantity_on_hand,
+      location: match.location || "Unknown",
       scannedTag: cleanTag,
       timestamp: new Date().toISOString(),
     });
@@ -524,39 +517,6 @@ function AuditScreen({ onPrintReport, users }) {
               RFID Scanner — Coming Soon
             </div>
           </div>
-
-          {/* DEMO: Sample Tags */}
-          {!currentMatch && (
-            <div style={{
-              background: C.bgCard, border: `1px dashed ${C.textDim}`, borderRadius: 12, padding: 16,
-              marginBottom: 16,
-            }}>
-              <div style={{ fontSize: 10, color: C.textDim, letterSpacing: 2, textTransform: "uppercase", marginBottom: 10 }}>
-                DEMO — TAP A TAG TO TEST
-              </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {[
-                  { tag: "100234", note: "45.2 kg · DUPLICATE" },
-                  { tag: "100235", note: "52.1 kg" },
-                  { tag: "100236", note: "195 kg · >180 WARN" },
-                  { tag: "00237", note: "38.7 kg · SHORT" },
-                  { tag: "100238", note: "210.5 kg · >180 WARN" },
-                  { tag: "100239", note: "47.9 kg" },
-                  { tag: "100240", note: "50.3 kg" },
-                  { tag: "999999", note: "NOT FOUND" },
-                ].map(s => (
-                  <button key={s.tag} onClick={() => { setTagInput(s.tag); setDuplicateWarning(false); }} style={{
-                    padding: "6px 10px", background: C.bgSection, border: `1px solid ${C.border}`,
-                    borderRadius: 6, color: C.textMuted, fontSize: 11, fontFamily: "inherit", cursor: "pointer",
-                    display: "flex", flexDirection: "column", alignItems: "center", gap: 2, minWidth: 80,
-                  }}>
-                    <span style={{ fontFamily: "'JetBrains Mono',monospace", fontWeight: 700, color: C.accent, fontSize: 12 }}>{s.tag}</span>
-                    <span style={{ fontSize: 9, color: C.textDim }}>{s.note}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
 
           {/* Duplicate Warning Banner */}
           {duplicateWarning && (
