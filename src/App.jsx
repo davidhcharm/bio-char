@@ -47,60 +47,6 @@ async function callAPI(endpoint, payload) {
   }
 }
 
-const handleScanTag = async () => {
-  if (!tagInput.trim()) return;
-  const cleanTag = tagInput.trim();
-
-  // Check for duplicates in already scanned bags (session-level — keep this)
-  const isDuplicate = scannedBags.some(b => matchSecurityTag(cleanTag, b.lot_number));
-  if (isDuplicate) {
-    setDuplicateWarning(true);
-    showNotif("⚠ DUPLICATE TAG — This security tag has already been scanned in this session!", "warning");
-    setTimeout(() => setDuplicateWarning(false), 5000);
-    return;
-  }
-
-  // Call Retool Workflow for lookup
-  const lookupResult = await callAPI("lookupTag", { tag: cleanTag });
-  const matches = lookupResult?.data || [];
-
-  if (!matches.length) {
-    showNotif("No matching lot found for tag: " + cleanTag, "error");
-    return;
-  }
-
-  // Call Retool Workflow for duplicate check
-  const dupResult = await callAPI("checkDuplicate", { tag: cleanTag });
-  const dupData = dupResult?.data || [];
-  const hasInventoryDuplicate = dupData.length > 0;
-
-  if (hasInventoryDuplicate) {
-    setDuplicateWarning(true);
-    setInventoryDuplicate(true);
-    showNotif("⚠ DUPLICATE LOT IN INVENTORY — Authorized approval required!", "warning");
-  } else {
-    setInventoryDuplicate(false);
-  }
-
-  const match = matches[0];
-  setCurrentMatch({
-    lot_number: match.lot_number,
-    prod_code: match.product_code,
-    quantity_on_hand: match.quantity_on_hand,
-    location: match.location || "Unknown",
-    scannedTag: cleanTag,
-    timestamp: new Date().toISOString(),
-  });
-
-  if (match.quantity_on_hand > 180) {
-    setWeightWarning(true);
-  }
-
-  setSelectedQuality("");
-  setDiscrepancyNote("");
-  setReweighValue("");
-};
-
 const QUALITY_OPTIONS = ["Fully Pyrolyzed Char", "Cookie Dough Char", "Unknown"];
 
 // ============================================================
@@ -358,11 +304,11 @@ function AuditScreen({ onPrintReport, users }) {
     setTimeout(() => setNotification(null), 3500);
   };
 
-  const handleScanTag = () => {
+  const handleScanTag = async () => {
     if (!tagInput.trim()) return;
     const cleanTag = tagInput.trim();
 
-    // Check for duplicates in already scanned bags
+    // Check for duplicates in already scanned bags (session-level)
     const isDuplicate = scannedBags.some(b => matchSecurityTag(cleanTag, b.lot_number));
     if (isDuplicate) {
       setDuplicateWarning(true);
@@ -371,20 +317,34 @@ function AuditScreen({ onPrintReport, users }) {
       return;
     }
 
+    // Call Retool Workflow for lookup
+    const lookupResult = await callAPI("lookupTag", { tag: cleanTag });
+    const matches = lookupResult?.data || [];
 
-    // Check for duplicates in inventory itself
-    const hasInventoryDuplicate = matches.length > 1;
+    if (!matches.length) {
+      showNotif("No matching lot found for tag: " + cleanTag, "error");
+      return;
+    }
+
+    // Call Retool Workflow for duplicate check
+    const dupResult = await callAPI("checkDuplicate", { tag: cleanTag });
+    const dupData = dupResult?.data || [];
+    const hasInventoryDuplicate = dupData.length > 0;
+
     if (hasInventoryDuplicate) {
       setDuplicateWarning(true);
       setInventoryDuplicate(true);
-      showNotif("⚠ DUPLICATE LOT IN INVENTORY — Authorized approval will be required to submit!", "warning");
+      showNotif("⚠ DUPLICATE LOT IN INVENTORY — Authorized approval required!", "warning");
     } else {
       setInventoryDuplicate(false);
     }
 
     const match = matches[0];
     setCurrentMatch({
-      ...match,
+      lot_number: match.lot_number,
+      prod_code: match.product_code,
+      quantity_on_hand: match.quantity_on_hand,
+      location: match.location || "Unknown",
       scannedTag: cleanTag,
       timestamp: new Date().toISOString(),
     });
