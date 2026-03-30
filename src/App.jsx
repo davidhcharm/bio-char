@@ -92,6 +92,21 @@ const PRODUCTION_PERIODS = [
   { id: 2612, name: "December 2026 PP",   color: "Red",    start: "2026-12-01", end: "2026-12-31" },
 ];
 
+// Storage locations for bio_char at Bighorn (from Manufacturo)
+const STORAGE_LOCATIONS = [
+  { code: "biochar_dry", label: "Biochar Dry" },
+  { code: "char_dry", label: "Char Dry" },
+];
+
+// Local queue for failed/offline inventory creation attempts
+const QUEUE_KEY = "biochar_create_queue";
+function getLocalQueue() {
+  try { return JSON.parse(localStorage.getItem(QUEUE_KEY) || "[]"); } catch { return []; }
+}
+function saveLocalQueue(queue) {
+  localStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
+}
+
 function getProductionPeriod(productionDateStr) {
   if (!productionDateStr) return null;
   const d = new Date(productionDateStr);
@@ -385,6 +400,16 @@ function AuditScreen({ onPrintReport, users }) {
   const [discrepancyNote, setDiscrepancyNote] = useState("");
   const [view, setView] = useState("scan");
   const [showReviewModal, setShowReviewModal] = useState(false);
+  const [showWeightCorrection, setShowWeightCorrection] = useState(false);
+  const [notFoundTag, setNotFoundTag] = useState(null); // tag that wasn't found
+  const [showNotFoundForm, setShowNotFoundForm] = useState(false);
+  const [newBagWeight, setNewBagWeight] = useState("");
+  const [newBagUnits, setNewBagUnits] = useState("kg");
+  const [newBagPP, setNewBagPP] = useState("");
+  const [newBagLocation, setNewBagLocation] = useState(STORAGE_LOCATIONS[0]?.code || "");
+  const [newBagQuality, setNewBagQuality] = useState("");
+  const [newBagNotes, setNewBagNotes] = useState("");
+  const [isCreating, setIsCreating] = useState(false);
   const inputRef = useRef(null);
 
   const showNotif = (msg, type = "success") => {
@@ -410,7 +435,8 @@ function AuditScreen({ onPrintReport, users }) {
     const matches = lookupResult?.data || [];
 
     if (!matches.length) {
-      showNotif("No matching lot found for tag: " + cleanTag, "error");
+      // Show "not found" confirmation instead of just an error
+      setNotFoundTag(cleanTag);
       return;
     }
 
@@ -428,18 +454,37 @@ function AuditScreen({ onPrintReport, users }) {
     }
 
     const match = matches[0];
+
+    // For bags with production dates Oct 2025+, weights >180 are assumed to be in lbs (wrong units).
+    // Auto-convert to kg and flag for re-weigh confirmation.
+    const OCT_2025 = new Date("2025-10-01").getTime();
+    const prodDate = match.production_date ? new Date(match.production_date).getTime() : 0;
+    const isRecentBag = prodDate >= OCT_2025;
+    let quantity = match.quantity_on_hand;
+    let autoConverted = false;
+
+    if (quantity > 180 && isRecentBag) {
+      // Auto-convert from lbs to kg
+      quantity = Math.round(quantity * 0.453592 * 10) / 10;
+      autoConverted = true;
+    }
+
     setCurrentMatch({
       lot_number: match.lot_number,
       prod_code: match.product_code,
-      quantity_on_hand: match.quantity_on_hand,
+      quantity_on_hand: quantity,
+      quantity_original: match.quantity_on_hand,
+      auto_converted: autoConverted,
       location: match.location || "Unknown",
       production_date: match.production_date || null,
       scannedTag: cleanTag,
       timestamp: new Date().toISOString(),
     });
 
-    // Weight threshold check
-    if (match.quantity_on_hand > 180) {
+    // Weight threshold check — require re-weigh if auto-converted OR if still >180 (pre-Oct 2025 bags)
+    if (autoConverted) {
+      setWeightWarning(true);
+    } else if (match.quantity_on_hand > 180) {
       setWeightWarning(true);
     }
 
@@ -491,12 +536,21 @@ function AuditScreen({ onPrintReport, users }) {
     setCurrentMatch(null);
     setTagInput("");
     setWeightWarning(false);
+    setShowWeightCorrection(false);
     setSelectedQuality("");
     setReweighValue("");
     setDiscrepancyNote("");
     setDuplicateWarning(false);
     setInventoryDuplicate(false);
     setShowReviewModal(false);
+    setNotFoundTag(null);
+    setShowNotFoundForm(false);
+    setNewBagWeight("");
+    setNewBagUnits("kg");
+    setNewBagPP("");
+    setNewBagLocation(STORAGE_LOCATIONS[0]?.code || "");
+    setNewBagQuality("");
+    setNewBagNotes("");
   };
 
   const formFilled = currentMatch && selectedQuality && (!weightWarning || reweighValue);
@@ -516,9 +570,377 @@ function AuditScreen({ onPrintReport, users }) {
     };
   };
 
+  // Handle creating new inventory for a "not found" tag
+  const handleCreateInventory = async () => {
+    if (!newBagWeight || !newBagPP || !newBagQuality || !newBagLocation) {
+      showNotif("Please fill in all required fields", "warning");
+      return;
+    }
+
+    setIsCreating(true);
+
+    // Convert weight if needed
+    const rawWeight = parseFloat(newBagWeight);
+    let weightKg = rawWeight;
+    if (newBagUnits === "lbs") {
+      weightKg = Math.round(rawWeight * 0.453592 * 10) / 10;
+    }
+
+    // Derive production date from selected PP
+    const selectedPP = PRODUCTION_PERIODS.find(p => String(p.id) === String(newBagPP));
+    const productionDate = selectedPP ? selectedPP.start : new Date().toISOString().split("T")[0];
+
+    const createPayload = {
+      siteCode: "CHARM",
+      productCode: "bio_char",
+      productRevision: "A",
+      lotNo: notFoundTag,
+      quantity: weightKg,
+      status: "AVAILABLE",
+      productionDate: productionDate,
+      locationCode: newBagLocation,
+      traceCustomAttributes: {
+        values: {
+          char_type: newBagQuality,
+        },
+      },
+    };
+
+    // Queue locally first
+    const queueEntry = {
+      ...createPayload,
+      _meta: {
+        createdAt: new Date().toISOString(),
+        scannedTag: notFoundTag,
+        originalWeight: rawWeight,
+        originalUnits: newBagUnits,
+        ppName: selectedPP?.name || "Unknown",
+        notes: newBagNotes,
+        status: "pending",
+      },
+    };
+
+    const queue = getLocalQueue();
+    queue.push(queueEntry);
+    saveLocalQueue(queue);
+
+    // Attempt API submission
+    try {
+      const result = await callAPI("createInventory", {
+        requests: [createPayload],
+      });
+
+      if (result && !result.error) {
+        // Mark as submitted in queue
+        queue[queue.length - 1]._meta.status = "submitted";
+        saveLocalQueue(queue);
+
+        // Add to scanned bags for session tracking
+        const bagEntry = {
+          lot_number: notFoundTag,
+          prod_code: "bio_char",
+          quantity_on_hand: weightKg,
+          location: newBagLocation,
+          production_date: productionDate,
+          scannedTag: notFoundTag,
+          quality: newBagQuality,
+          reweighKg: null,
+          discrepancy: newBagNotes || "NEW — Created via audit app",
+          status: "created",
+          confirmedAt: new Date().toISOString(),
+          approvedBy: null,
+          isNew: true,
+        };
+        setScannedBags(prev => [...prev, bagEntry]);
+        showNotif(`✓ Inventory created for tag ${notFoundTag}`, "success");
+      } else {
+        // API failed but queued locally
+        showNotif(`⚠ Queued locally — API submission failed. Will retry later.`, "warning");
+
+        // Still add to session for tracking
+        const bagEntry = {
+          lot_number: notFoundTag,
+          prod_code: "bio_char",
+          quantity_on_hand: weightKg,
+          location: newBagLocation,
+          production_date: productionDate,
+          scannedTag: notFoundTag,
+          quality: newBagQuality,
+          reweighKg: null,
+          discrepancy: newBagNotes || "NEW — Queued locally (API pending)",
+          status: "queued",
+          confirmedAt: new Date().toISOString(),
+          approvedBy: null,
+          isNew: true,
+        };
+        setScannedBags(prev => [...prev, bagEntry]);
+      }
+    } catch (err) {
+      console.error("[CreateInventory] Error:", err);
+      showNotif(`⚠ Queued locally — will retry when online.`, "warning");
+
+      const bagEntry = {
+        lot_number: notFoundTag,
+        prod_code: "bio_char",
+        quantity_on_hand: weightKg,
+        location: newBagLocation,
+        production_date: productionDate,
+        scannedTag: notFoundTag,
+        quality: newBagQuality,
+        reweighKg: null,
+        discrepancy: newBagNotes || "NEW — Queued locally (offline)",
+        status: "queued",
+        confirmedAt: new Date().toISOString(),
+        approvedBy: null,
+        isNew: true,
+      };
+      setScannedBags(prev => [...prev, bagEntry]);
+    }
+
+    setIsCreating(false);
+    resetForm();
+    if (inputRef.current) inputRef.current.focus();
+  };
+
   return (
     <div>
       <Notification notification={notification} />
+
+      {/* Not Found Confirmation Modal */}
+      {notFoundTag && !showNotFoundForm && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)",
+          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
+          padding: 20, animation: "fadeIn 0.2s ease",
+        }}>
+          <div style={{
+            background: C.bgCard, borderRadius: 16, padding: 28, width: "100%", maxWidth: 400,
+            border: `2px solid ${C.warning}`, boxShadow: `0 0 40px ${C.warningGlow}`,
+          }}>
+            <div style={{ textAlign: "center", marginBottom: 20 }}>
+              <div style={{ fontSize: 40, marginBottom: 8 }}>🔍</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: C.warning, letterSpacing: 2 }}>
+                TAG NOT FOUND
+              </div>
+              <div style={{ fontSize: 13, color: C.textMuted, marginTop: 8 }}>
+                No inventory found for security tag:
+              </div>
+              <div style={{
+                fontSize: 28, fontWeight: 900, color: C.text, fontFamily: "'JetBrains Mono',monospace",
+                marginTop: 8, letterSpacing: 3,
+              }}>{notFoundTag}</div>
+            </div>
+
+            <div style={{
+              background: C.bgSection, borderRadius: 10, padding: 16, marginBottom: 20,
+              border: `1px solid ${C.border}`,
+            }}>
+              <div style={{ fontSize: 12, color: C.textMuted, lineHeight: 1.6 }}>
+                Please confirm the security tag was entered correctly. If confirmed, you can create new inventory for this tag.
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 12 }}>
+              <button onClick={() => { setNotFoundTag(null); setTagInput(""); }} style={{
+                flex: 1, padding: "14px", background: "transparent", color: C.textMuted,
+                border: `1px solid ${C.border}`, borderRadius: 10, fontSize: 14, fontWeight: 600,
+                fontFamily: "inherit", cursor: "pointer",
+              }}>Re-enter Tag</button>
+              <button onClick={() => setShowNotFoundForm(true)} style={{
+                flex: 2, padding: "14px", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700,
+                fontFamily: "inherit", cursor: "pointer", letterSpacing: 2, textTransform: "uppercase",
+                background: C.warning, color: C.bg,
+              }}>TAG IS CORRECT →</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Not Found — Create Inventory Form */}
+      {notFoundTag && showNotFoundForm && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)",
+          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
+          padding: 20, animation: "fadeIn 0.2s ease",
+        }}>
+          <div style={{
+            background: C.bgCard, borderRadius: 16, padding: 24, width: "100%", maxWidth: 460,
+            border: `2px solid ${C.accent}`, boxShadow: `0 0 40px ${C.accentGlow}`,
+            maxHeight: "90vh", overflowY: "auto",
+          }}>
+            {/* Header */}
+            <div style={{ textAlign: "center", marginBottom: 20 }}>
+              <div style={{ fontSize: 32, marginBottom: 8 }}>📦</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: C.accent, letterSpacing: 2 }}>
+                CREATE NEW INVENTORY
+              </div>
+              <div style={{ fontSize: 12, color: C.textMuted, marginTop: 4 }}>
+                Tag: <span style={{ color: C.text, fontWeight: 700, fontFamily: "'JetBrains Mono',monospace" }}>{notFoundTag}</span>
+              </div>
+            </div>
+
+            {/* Weight + Units */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 11, color: C.textMuted, letterSpacing: 2, display: "block", marginBottom: 6 }}>
+                WEIGHT *
+              </label>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  type="number"
+                  value={newBagWeight}
+                  onChange={e => setNewBagWeight(e.target.value)}
+                  placeholder="Enter weight..."
+                  style={{
+                    flex: 1, padding: "12px 16px", background: C.bgInput,
+                    border: `1px solid ${C.border}`, borderRadius: 8, color: C.text,
+                    fontSize: 16, fontFamily: "inherit", outline: "none", boxSizing: "border-box",
+                  }}
+                />
+                <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: `1px solid ${C.border}` }}>
+                  {["kg", "lbs"].map(u => (
+                    <button key={u} onClick={() => setNewBagUnits(u)} style={{
+                      padding: "12px 16px", border: "none", fontSize: 13, fontWeight: 700,
+                      fontFamily: "inherit", cursor: "pointer", letterSpacing: 1,
+                      background: newBagUnits === u ? C.accent : C.bgSection,
+                      color: newBagUnits === u ? C.bg : C.textMuted,
+                      transition: "all 0.2s",
+                    }}>{u.toUpperCase()}</button>
+                  ))}
+                </div>
+              </div>
+              {newBagWeight && newBagUnits === "lbs" && (
+                <div style={{ fontSize: 11, color: C.info, marginTop: 6 }}>
+                  ≈ {(parseFloat(newBagWeight) * 0.453592).toFixed(1)} kg after conversion
+                </div>
+              )}
+            </div>
+
+            {/* Production Period */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 11, color: C.textMuted, letterSpacing: 2, display: "block", marginBottom: 6 }}>
+                PRODUCTION PERIOD *
+              </label>
+              <select
+                value={newBagPP}
+                onChange={e => setNewBagPP(e.target.value)}
+                style={{
+                  width: "100%", padding: "12px 14px", background: C.bgInput,
+                  border: `1px solid ${C.border}`, borderRadius: 8, color: C.text,
+                  fontSize: 14, fontFamily: "inherit", outline: "none",
+                  appearance: "none", cursor: "pointer", boxSizing: "border-box",
+                }}
+              >
+                <option value="">Select production period...</option>
+                {PRODUCTION_PERIODS.slice().reverse().map(pp => {
+                  const colors = PP_COLORS[pp.color];
+                  return (
+                    <option key={pp.id} value={pp.id}>
+                      {pp.name} ({pp.start} → {pp.end})
+                    </option>
+                  );
+                })}
+              </select>
+              {newBagPP && (
+                <div style={{ marginTop: 8 }}>
+                  <PPBadge productionDate={PRODUCTION_PERIODS.find(p => String(p.id) === String(newBagPP))?.start} />
+                </div>
+              )}
+            </div>
+
+            {/* Char Quality */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 11, color: C.textMuted, letterSpacing: 2, display: "block", marginBottom: 8 }}>
+                CHAR QUALITY *
+              </label>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {QUALITY_OPTIONS.map(q => (
+                  <button key={q} onClick={() => setNewBagQuality(q)} style={{
+                    padding: "10px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600,
+                    fontFamily: "inherit", cursor: "pointer", letterSpacing: 0.5,
+                    background: newBagQuality === q ? C.accent : C.bgSection,
+                    color: newBagQuality === q ? C.bg : C.textMuted,
+                    border: `1px solid ${newBagQuality === q ? C.accent : C.border}`,
+                    transition: "all 0.2s",
+                  }}>{q}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* Storage Location */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 11, color: C.textMuted, letterSpacing: 2, display: "block", marginBottom: 6 }}>
+                STORAGE LOCATION *
+              </label>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {STORAGE_LOCATIONS.map(loc => (
+                  <button key={loc.code} onClick={() => setNewBagLocation(loc.code)} style={{
+                    padding: "10px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600,
+                    fontFamily: "inherit", cursor: "pointer", letterSpacing: 0.5,
+                    background: newBagLocation === loc.code ? C.accent : C.bgSection,
+                    color: newBagLocation === loc.code ? C.bg : C.textMuted,
+                    border: `1px solid ${newBagLocation === loc.code ? C.accent : C.border}`,
+                    transition: "all 0.2s",
+                  }}>{loc.label}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* Notes */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ fontSize: 11, color: C.textMuted, letterSpacing: 2, display: "block", marginBottom: 6 }}>
+                NOTES (OPTIONAL)
+              </label>
+              <textarea
+                value={newBagNotes}
+                onChange={e => setNewBagNotes(e.target.value)}
+                placeholder="Any additional notes..."
+                rows={2}
+                style={{
+                  width: "100%", padding: "12px 16px", background: C.bgInput,
+                  border: `1px solid ${C.border}`, borderRadius: 8, color: C.text,
+                  fontSize: 13, fontFamily: "inherit", outline: "none", resize: "vertical",
+                  boxSizing: "border-box",
+                }}
+              />
+            </div>
+
+            {/* Unit Confirmation Banner */}
+            {newBagWeight && (
+              <div style={{
+                padding: "10px 16px", marginBottom: 16, borderRadius: 8,
+                background: C.infoGlow, border: `1px solid ${C.info}`,
+                fontSize: 12, color: C.info, fontWeight: 600, textAlign: "center",
+              }}>
+                Submitting: {newBagUnits === "lbs"
+                  ? `${newBagWeight} lbs → ${(parseFloat(newBagWeight) * 0.453592).toFixed(1)} kg`
+                  : `${parseFloat(newBagWeight).toFixed(1)} kg`
+                }
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div style={{ display: "flex", gap: 12 }}>
+              <button onClick={resetForm} style={{
+                flex: 1, padding: "14px", background: "transparent", color: C.textMuted,
+                border: `1px solid ${C.border}`, borderRadius: 10, fontSize: 14, fontWeight: 600,
+                fontFamily: "inherit", cursor: "pointer",
+              }}>Cancel</button>
+              <button
+                onClick={handleCreateInventory}
+                disabled={!newBagWeight || !newBagPP || !newBagQuality || !newBagLocation || isCreating}
+                style={{
+                  flex: 2, padding: "14px", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700,
+                  fontFamily: "inherit", letterSpacing: 2, textTransform: "uppercase",
+                  cursor: (!newBagWeight || !newBagPP || !newBagQuality || !newBagLocation || isCreating) ? "not-allowed" : "pointer",
+                  background: (!newBagWeight || !newBagPP || !newBagQuality || !newBagLocation) ? C.disabled : C.accent,
+                  color: (!newBagWeight || !newBagPP || !newBagQuality || !newBagLocation) ? C.disabledText : C.bg,
+                  transition: "all 0.3s",
+                }}
+              >{isCreating ? "CREATING..." : "CREATE INVENTORY ✓"}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Review Modal */}
       {showReviewModal && buildBagData() && (
@@ -660,37 +1082,83 @@ function AuditScreen({ onPrintReport, users }) {
                 border: `1px solid ${weightWarning ? C.warning : C.border}`,
                 borderRadius: 8, padding: 16, marginBottom: 16,
               }}>
-                <div style={{ fontSize: 11, color: C.textMuted, letterSpacing: 2, marginBottom: 4 }}>QUANTITY ON HAND (KG)</div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                  <div style={{ fontSize: 11, color: C.textMuted, letterSpacing: 2 }}>QUANTITY ON HAND (KG)</div>
+                  {!weightWarning && !showWeightCorrection && (
+                    <button onClick={() => setShowWeightCorrection(true)} style={{
+                      padding: "4px 10px", background: "transparent", border: `1px solid ${C.border}`,
+                      borderRadius: 6, color: C.textMuted, fontSize: 10, fontFamily: "inherit",
+                      cursor: "pointer", letterSpacing: 1, transition: "all 0.15s",
+                    }}
+                      onMouseEnter={e => { e.currentTarget.style.borderColor = C.warning; e.currentTarget.style.color = C.warning; }}
+                      onMouseLeave={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.color = C.textMuted; }}
+                    >✏ CORRECT</button>
+                  )}
+                </div>
                 <div style={{
                   fontSize: 36, fontWeight: 900, fontFamily: "'JetBrains Mono',monospace",
                   color: weightWarning ? C.warning : C.pass,
                 }}>
                   {currentMatch.quantity_on_hand.toFixed(1)}
+                  {currentMatch.auto_converted && (
+                    <span style={{ fontSize: 14, fontWeight: 600, marginLeft: 8 }}>kg</span>
+                  )}
                 </div>
-                {weightWarning && (
+                {currentMatch.auto_converted && (
+                  <div style={{
+                    fontSize: 12, color: C.warning, fontWeight: 600, marginTop: 8,
+                    padding: "8px 12px", background: C.warningGlow, borderRadius: 6,
+                  }}>
+                    ⚠ Auto-converted from {currentMatch.quantity_original} lbs → {currentMatch.quantity_on_hand.toFixed(1)} kg
+                    <br />
+                    <span style={{ fontSize: 11, fontWeight: 400, color: C.textMuted }}>
+                      Original weight exceeded 180 (Oct 2025+ production). Please re-weigh to confirm.
+                    </span>
+                  </div>
+                )}
+                {weightWarning && !currentMatch.auto_converted && (
                   <div style={{ fontSize: 12, color: C.warning, fontWeight: 600, marginTop: 8 }}>
                     ⚠ Weight exceeds 180 kg — Re-weigh required to confirm units are in kg
                   </div>
                 )}
               </div>
 
-              {/* Re-weigh Input */}
-              {weightWarning && (
-                <div style={{ marginBottom: 16 }}>
-                  <label style={{ fontSize: 11, color: C.textMuted, letterSpacing: 2, display: "block", marginBottom: 6 }}>
-                    RE-WEIGH VALUE (KG)
-                  </label>
+              {/* Weight Correction / Re-weigh Input */}
+              {(weightWarning || showWeightCorrection) && (
+                <div style={{
+                  marginBottom: 16, background: C.bgSection, border: `1px solid ${weightWarning ? C.warning : C.info}`,
+                  borderRadius: 8, padding: 16,
+                }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <label style={{ fontSize: 11, color: weightWarning ? C.warning : C.info, letterSpacing: 2, fontWeight: 700 }}>
+                      {weightWarning ? "RE-WEIGH VALUE (KG)" : "CORRECTED WEIGHT (KG)"}
+                    </label>
+                    {!weightWarning && (
+                      <button onClick={() => { setShowWeightCorrection(false); setReweighValue(""); }} style={{
+                        padding: "2px 8px", background: "transparent", border: `1px solid ${C.border}`,
+                        borderRadius: 4, color: C.textDim, fontSize: 10, fontFamily: "inherit", cursor: "pointer",
+                      }}>✕ Cancel</button>
+                    )}
+                  </div>
                   <input
                     type="number"
                     value={reweighValue}
                     onChange={e => setReweighValue(e.target.value)}
-                    placeholder="Enter confirmed weight in kg..."
+                    placeholder={weightWarning ? "Enter confirmed weight in kg..." : "Enter corrected weight in kg..."}
                     style={{
                       width: "100%", padding: "12px 16px", background: C.bgInput,
-                      border: `1px solid ${C.warning}`, borderRadius: 8, color: C.text,
+                      border: `1px solid ${weightWarning ? C.warning : C.info}`, borderRadius: 8, color: C.text,
                       fontSize: 16, fontFamily: "inherit", outline: "none", boxSizing: "border-box",
                     }}
                   />
+                  {reweighValue && (
+                    <div style={{ fontSize: 11, color: C.textMuted, marginTop: 6 }}>
+                      Original: {currentMatch.quantity_on_hand.toFixed(1)} kg → Corrected: {parseFloat(reweighValue).toFixed(1)} kg
+                      {Math.abs(parseFloat(reweighValue) - currentMatch.quantity_on_hand) > 0.05 && (
+                        <span style={{ color: C.warning, marginLeft: 8 }}>⚠ Weight will be flagged as altered</span>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -748,10 +1216,12 @@ function AuditScreen({ onPrintReport, users }) {
                   {[
                     "Quality issue noted",
                     "Weight in wrong units",
+                    "Weight is incorrect",
                     "Multiple tags on bag, unsure which one to report",
                   ].map(note => (
                     <button key={note} onClick={() => {
                       setDiscrepancyNote(prev => prev ? prev + "; " + note : note);
+                      if (note.startsWith("Weight")) setShowWeightCorrection(true);
                     }} style={{
                       padding: "6px 12px", background: C.bgSection, border: `1px solid ${C.border}`,
                       borderRadius: 6, color: C.textMuted, fontSize: 11, fontFamily: "inherit",
