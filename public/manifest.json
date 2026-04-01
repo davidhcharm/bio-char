@@ -1,1 +1,25 @@
 
+{
+  "name": "Bio-Char Inventory Audit",
+  "short_name": "Bio-Char Audit",
+  "description": "Charm Industrial Bio-Char Inventory Audit & Tracking System",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#080c10",
+  "theme_color": "#34d399",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
