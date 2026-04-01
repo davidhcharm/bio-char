@@ -111,11 +111,42 @@ const LOCATION_ROUTING = {
 
 // Local queue for failed/offline inventory creation attempts
 const QUEUE_KEY = "biochar_create_queue";
+const SCAN_QUEUE_KEY = "biochar_scan_queue";
+const SESSION_KEY = "biochar_session_bags";
+
 function getLocalQueue() {
   try { return JSON.parse(localStorage.getItem(QUEUE_KEY) || "[]"); } catch { return []; }
 }
 function saveLocalQueue(queue) {
   localStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
+}
+function getLocalScanQueue() {
+  try { return JSON.parse(localStorage.getItem(SCAN_QUEUE_KEY) || "[]"); } catch { return []; }
+}
+function saveLocalScanQueue(queue) {
+  localStorage.setItem(SCAN_QUEUE_KEY, JSON.stringify(queue));
+}
+function getSessionBags() {
+  try { return JSON.parse(localStorage.getItem(SESSION_KEY) || "[]"); } catch { return []; }
+}
+function saveSessionBags(bags) {
+  localStorage.setItem(SESSION_KEY, JSON.stringify(bags));
+}
+
+// Offline status hook
+function useOnlineStatus() {
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  useEffect(() => {
+    const goOnline = () => setIsOnline(true);
+    const goOffline = () => setIsOnline(false);
+    window.addEventListener("online", goOnline);
+    window.addEventListener("offline", goOffline);
+    return () => {
+      window.removeEventListener("online", goOnline);
+      window.removeEventListener("offline", goOffline);
+    };
+  }, []);
+  return isOnline;
 }
 
 function getProductionPeriod(productionDateStr) {
@@ -399,7 +430,7 @@ function ReviewModal({ bagData, isDuplicate, users, onConfirm, onCancel }) {
 // ============================================================
 function AuditScreen({ onPrintReport, users }) {
   const [tagInput, setTagInput] = useState("");
-  const [scannedBags, setScannedBags] = useState([]);
+  const [scannedBags, setScannedBags] = useState(() => getSessionBags());
   const [currentMatch, setCurrentMatch] = useState(null);
   const [duplicateWarning, setDuplicateWarning] = useState(false);
   const [inventoryDuplicate, setInventoryDuplicate] = useState(false);
@@ -412,7 +443,7 @@ function AuditScreen({ onPrintReport, users }) {
   const [view, setView] = useState("scan");
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [showWeightCorrection, setShowWeightCorrection] = useState(false);
-  const [notFoundTag, setNotFoundTag] = useState(null); // tag that wasn't found
+  const [notFoundTag, setNotFoundTag] = useState(null);
   const [showNotFoundForm, setShowNotFoundForm] = useState(false);
   const [newBagWeight, setNewBagWeight] = useState("");
   const [newBagUnits, setNewBagUnits] = useState("kg");
@@ -421,8 +452,81 @@ function AuditScreen({ onPrintReport, users }) {
   const [newBagQuality, setNewBagQuality] = useState("");
   const [newBagNotes, setNewBagNotes] = useState("");
   const [isCreating, setIsCreating] = useState(false);
-  const [locationRouting, setLocationRouting] = useState(null); // { lot, quality, location, color, icon }
+  const [locationRouting, setLocationRouting] = useState(null);
+  const [pendingCount, setPendingCount] = useState(() => getLocalScanQueue().length + getLocalQueue().filter(q => q._meta?.status === "pending").length);
+  const isOnline = useOnlineStatus();
   const inputRef = useRef(null);
+
+  // Persist scanned bags to localStorage on change
+  useEffect(() => {
+    saveSessionBags(scannedBags);
+  }, [scannedBags]);
+
+  // Sync pending items when coming back online
+  useEffect(() => {
+    if (!isOnline) return;
+    const syncPending = async () => {
+      // 1. Sync pending scan queue (offline lookups that need re-verification)
+      const scanQueue = getLocalScanQueue();
+      if (scanQueue.length > 0) {
+        let synced = 0;
+        const remaining = [];
+        for (const item of scanQueue) {
+          try {
+            const lookupResult = await callAPI("lookupTag", { tag: item.scannedTag });
+            const matches = lookupResult?.data || [];
+            if (matches.length > 0) {
+              // Update the session bag with real data
+              setScannedBags(prev => prev.map(b =>
+                b.scannedTag === item.scannedTag && b.status === "offline"
+                  ? { ...b, ...matches[0], status: "synced", lot_number: matches[0].lot_number || b.lot_number }
+                  : b
+              ));
+              synced++;
+            } else {
+              remaining.push(item);
+            }
+          } catch {
+            remaining.push(item);
+          }
+        }
+        saveLocalScanQueue(remaining);
+        if (synced > 0) {
+          showNotif(`✓ Synced ${synced} offline scan${synced > 1 ? "s" : ""}`, "success");
+        }
+      }
+
+      // 2. Retry pending create inventory queue
+      const createQueue = getLocalQueue();
+      let createSynced = 0;
+      const updatedQueue = [];
+      for (const item of createQueue) {
+        if (item._meta?.status !== "pending") {
+          updatedQueue.push(item);
+          continue;
+        }
+        try {
+          const result = await callAPI("createInventory", { requests: [item] });
+          if (result && !result.error) {
+            updatedQueue.push({ ...item, _meta: { ...item._meta, status: "submitted" } });
+            createSynced++;
+          } else {
+            updatedQueue.push(item);
+          }
+        } catch {
+          updatedQueue.push(item);
+        }
+      }
+      saveLocalQueue(updatedQueue);
+      if (createSynced > 0) {
+        showNotif(`✓ Synced ${createSynced} pending inventory creation${createSynced > 1 ? "s" : ""}`, "success");
+      }
+
+      setPendingCount(getLocalScanQueue().length + getLocalQueue().filter(q => q._meta?.status === "pending").length);
+    };
+
+    syncPending();
+  }, [isOnline]);
 
   const showNotif = (msg, type = "success") => {
     setNotification({ msg, type });
@@ -439,6 +543,36 @@ function AuditScreen({ onPrintReport, users }) {
       setDuplicateWarning(true);
       showNotif("⚠ DUPLICATE TAG — This security tag has already been scanned in this session!", "warning");
       setTimeout(() => setDuplicateWarning(false), 5000);
+      return;
+    }
+
+    // If offline, queue the scan locally
+    if (!navigator.onLine) {
+      const offlineBag = {
+        lot_number: cleanTag,
+        prod_code: "bio_char",
+        quantity_on_hand: 0,
+        location: "—",
+        production_date: null,
+        scannedTag: cleanTag,
+        quality: "—",
+        reweighKg: null,
+        discrepancy: "Scanned offline — pending sync",
+        status: "offline",
+        confirmedAt: new Date().toISOString(),
+        approvedBy: null,
+        isOffline: true,
+      };
+      setScannedBags(prev => [...prev, offlineBag]);
+
+      // Add to scan queue for sync later
+      const queue = getLocalScanQueue();
+      queue.push({ scannedTag: cleanTag, timestamp: new Date().toISOString() });
+      saveLocalScanQueue(queue);
+      setPendingCount(prev => prev + 1);
+
+      showNotif(`📴 Tag ${cleanTag} saved offline — will sync when online`, "info");
+      setTagInput("");
       return;
     }
 
@@ -1131,10 +1265,25 @@ function AuditScreen({ onPrintReport, users }) {
             {scannedBags.length} bag{scannedBags.length !== 1 ? "s" : ""} scanned
           </div>
         </div>
-        <div style={{
-          fontSize: 11, fontWeight: 700, color: C.accent, background: C.accentGlow,
-          padding: "4px 10px", borderRadius: 6, letterSpacing: 1,
-        }}>v1.1</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {!isOnline && (
+            <div style={{
+              fontSize: 10, fontWeight: 700, color: C.fail, background: C.failGlow,
+              padding: "4px 8px", borderRadius: 6, letterSpacing: 1,
+              animation: "pulse 2s ease-in-out infinite",
+            }}>📴 OFFLINE</div>
+          )}
+          {pendingCount > 0 && (
+            <div style={{
+              fontSize: 10, fontWeight: 700, color: C.warning, background: C.warningGlow,
+              padding: "4px 8px", borderRadius: 6, letterSpacing: 1,
+            }}>⏳ {pendingCount}</div>
+          )}
+          <div style={{
+            fontSize: 11, fontWeight: 700, color: C.accent, background: C.accentGlow,
+            padding: "4px 10px", borderRadius: 6, letterSpacing: 1,
+          }}>v1.2</div>
+        </div>
       </div>
 
       {/* Tab bar */}
