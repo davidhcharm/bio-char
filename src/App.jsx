@@ -985,6 +985,50 @@ function AuditScreen({ onPrintReport, users }) {
                   }}>{q}</button>
                 ))}
               </div>
+              {/* Quality Reference Photos */}
+              {newBagQuality && (
+                <div style={{
+                  marginTop: 12, borderRadius: 8, overflow: "hidden",
+                  border: `1px solid ${C.border}`, background: C.bgSection,
+                }}>
+                  <div style={{ fontSize: 10, color: C.textDim, letterSpacing: 2, padding: "8px 12px", textTransform: "uppercase" }}>
+                    {newBagQuality === "Unknown" ? "REFERENCE — COMPARE BOTH" : `REFERENCE — ${newBagQuality.toUpperCase()}`}
+                  </div>
+                  <div style={{
+                    display: "flex", gap: 1,
+                    justifyContent: "center",
+                  }}>
+                    {(newBagQuality === "Fully Pyrolyzed Char" || newBagQuality === "Unknown") && (
+                      <div style={{ flex: newBagQuality === "Unknown" ? 1 : undefined, textAlign: "center" }}>
+                        <img src={CHAR_PHOTO_PYROLYZED} alt="Fully Pyrolyzed" style={{
+                          width: newBagQuality === "Unknown" ? "100%" : 200,
+                          maxHeight: newBagQuality === "Unknown" ? 160 : 200,
+                          objectFit: "cover", display: "block",
+                        }} />
+                        {newBagQuality === "Unknown" && (
+                          <div style={{ fontSize: 10, color: C.pass, fontWeight: 700, padding: "6px 0", letterSpacing: 1 }}>
+                            FULLY PYROLYZED
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {(newBagQuality === "Cookie Dough Char" || newBagQuality === "Unknown") && (
+                      <div style={{ flex: newBagQuality === "Unknown" ? 1 : undefined, textAlign: "center" }}>
+                        <img src={CHAR_PHOTO_COOKIE} alt="Cookie Dough" style={{
+                          width: newBagQuality === "Unknown" ? "100%" : 200,
+                          maxHeight: newBagQuality === "Unknown" ? 160 : 200,
+                          objectFit: "cover", display: "block",
+                        }} />
+                        {newBagQuality === "Unknown" && (
+                          <div style={{ fontSize: 10, color: C.warning, fontWeight: 700, padding: "6px 0", letterSpacing: 1 }}>
+                            COOKIE DOUGH
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Storage Location */}
