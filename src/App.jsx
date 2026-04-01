@@ -181,7 +181,7 @@ function SplashScreen({ onDone }) {
         background: "radial-gradient(ellipse at center, rgba(52,211,153,0.06) 0%, transparent 70%)",
       }} />
       <div style={{ textAlign: "center", animation: "scaleIn 0.8s ease" }}>
-        <div style={{ fontSize: 48, fontWeight: 900, letterSpacing: 6, color: C.text, fontFamily: "Georgia,serif" }}>CHARM</div>
+        <div className="splash-title" style={{ fontSize: 48, fontWeight: 900, letterSpacing: 6, color: C.text, fontFamily: "Georgia,serif" }}>CHARM</div>
         <div style={{
           fontSize: 16, letterSpacing: 8, color: C.textMuted, fontFamily: "Georgia,serif", marginTop: 4,
           borderTop: `2px solid ${C.textMuted}`, borderBottom: `2px solid ${C.textMuted}`,
@@ -192,7 +192,7 @@ function SplashScreen({ onDone }) {
           borderRadius: 8, display: "block", marginLeft: "auto", marginRight: "auto",
         }} />
       </div>
-      <div style={{
+      <div className="splash-subtitle" style={{
         fontFamily: "'JetBrains Mono',monospace", fontSize: 24, fontWeight: 700,
         letterSpacing: 10, color: C.accent, marginTop: 24, textTransform: "uppercase",
         animation: "slideUp 0.6s ease 0.6s both",
@@ -779,18 +779,18 @@ function AuditScreen({ onPrintReport, users }) {
             textAlign: "center",
           }}>
             {/* Big Icon */}
-            <div style={{
+            <div className="modal-icon" style={{
               fontSize: 64, marginBottom: 16,
               animation: "scaleIn 0.3s ease",
             }}>{locationRouting.icon}</div>
 
             {/* Instruction */}
-            <div style={{
+            <div className="modal-title" style={{
               fontSize: 13, color: C.textMuted, letterSpacing: 2, textTransform: "uppercase",
               marginBottom: 8,
             }}>PUT CHAR SUPER SAC INTO</div>
 
-            <div style={{
+            <div className="location-name" style={{
               fontSize: 32, fontWeight: 900, color: locationRouting.color,
               letterSpacing: 4, fontFamily: "'JetBrains Mono',monospace",
               padding: "16px 0", marginBottom: 8,
@@ -973,7 +973,7 @@ function AuditScreen({ onPrintReport, users }) {
               <label style={{ fontSize: 11, color: C.textMuted, letterSpacing: 2, display: "block", marginBottom: 8 }}>
                 CHAR QUALITY *
               </label>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <div className="quality-buttons" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {QUALITY_OPTIONS.map(q => (
                   <button key={q} onClick={() => setNewBagQuality(q)} style={{
                     padding: "10px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600,
@@ -1119,14 +1119,14 @@ function AuditScreen({ onPrintReport, users }) {
       )}
 
       {/* Header */}
-      <div style={{
+      <div className="app-header" style={{
         display: "flex", alignItems: "center", gap: 12, padding: "16px 20px",
         borderBottom: `1px solid ${C.border}`, background: C.bgCard,
         position: "sticky", top: 0, zIndex: 100,
       }}>
         <img src={CHARM_LOGO} alt="" style={{ width: 32, height: 32, filter: "brightness(1.2)", borderRadius: 4 }} />
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 18, fontWeight: 700, color: C.text }}>Bio-Char Inventory Audit</div>
+          <div className="app-title" style={{ fontSize: 18, fontWeight: 700, color: C.text }}>Bio-Char Inventory Audit</div>
           <div style={{ fontSize: 11, color: C.textMuted, letterSpacing: 2, textTransform: "uppercase" }}>
             {scannedBags.length} bag{scannedBags.length !== 1 ? "s" : ""} scanned
           </div>
@@ -1138,7 +1138,7 @@ function AuditScreen({ onPrintReport, users }) {
       </div>
 
       {/* Tab bar */}
-      <div style={{ display: "flex", margin: "12px 16px 0", borderRadius: 8, overflow: "hidden", border: `1px solid ${C.border}` }}>
+      <div className="tab-bar" style={{ display: "flex", margin: "12px 16px 0", borderRadius: 8, overflow: "hidden", border: `1px solid ${C.border}` }}>
         {[
           { key: "scan", icon: "🏷", label: "Scan Tags" },
           { key: "history", icon: "📋", label: `Scanned (${scannedBags.length})` },
@@ -1154,7 +1154,7 @@ function AuditScreen({ onPrintReport, users }) {
       </div>
 
       {view === "scan" ? (
-        <div style={{ padding: "16px 20px" }}>
+        <div className="audit-content" style={{ padding: "16px 20px" }}>
           {/* Security Tag Input */}
           <div style={{
             background: C.bgCard, border: `1px solid ${C.border}`, borderRadius: 12, padding: 20,
@@ -1219,7 +1219,7 @@ function AuditScreen({ onPrintReport, users }) {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
                 <div>
                   <div style={{ fontSize: 11, color: C.textMuted, letterSpacing: 2, textTransform: "uppercase" }}>Matched Lot</div>
-                  <div style={{ fontSize: 24, fontWeight: 700, color: C.text, fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2 }}>
+                  <div className="lot-number-large" style={{ fontSize: 24, fontWeight: 700, color: C.text, fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2 }}>
                     {currentMatch.lot_number}
                   </div>
                 </div>
@@ -1260,7 +1260,7 @@ function AuditScreen({ onPrintReport, users }) {
                     >✏ CORRECT</button>
                   )}
                 </div>
-                <div style={{
+                <div className="weight-large" style={{
                   fontSize: 36, fontWeight: 900, fontFamily: "'JetBrains Mono',monospace",
                   color: weightWarning ? C.warning : C.pass,
                 }}>
@@ -1332,7 +1332,7 @@ function AuditScreen({ onPrintReport, users }) {
                 <label style={{ fontSize: 11, color: C.textMuted, letterSpacing: 2, display: "block", marginBottom: 8 }}>
                   CHAR QUALITY
                 </label>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <div className="quality-buttons" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   {QUALITY_OPTIONS.map(q => (
                     <button key={q} onClick={() => setSelectedQuality(q)} style={{
                       padding: "10px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600,
@@ -1492,7 +1492,7 @@ function AuditScreen({ onPrintReport, users }) {
                   { n: scannedBags.filter(b => b.status === "altered").length, label: "ALTERED", color: C.warning },
                 ].map((s, i) => (
                   <div key={i} style={{ textAlign: "center" }}>
-                    <div style={{ fontSize: 28, fontWeight: 900, color: s.color, fontFamily: "'JetBrains Mono',monospace" }}>{s.n}</div>
+                    <div className="stats-number" style={{ fontSize: 28, fontWeight: 900, color: s.color, fontFamily: "'JetBrains Mono',monospace" }}>{s.n}</div>
                     <div style={{ fontSize: 10, color: C.textMuted, letterSpacing: 1 }}>{s.label}</div>
                   </div>
                 ))}
@@ -1523,14 +1523,14 @@ function AuditScreen({ onPrintReport, users }) {
                 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <div>
-                      <div style={{ fontSize: 16, fontWeight: 700, color: C.text, fontFamily: "'JetBrains Mono',monospace" }}>
+                      <div className="history-lot" style={{ fontSize: 16, fontWeight: 700, color: C.text, fontFamily: "'JetBrains Mono',monospace" }}>
                         {bag.lot_number}
                       </div>
                       <div style={{ fontSize: 12, color: C.textMuted, marginTop: 2 }}>{bag.quality}</div>
                       {bag.production_date && <div style={{ marginTop: 4 }}><PPBadge productionDate={bag.production_date} size="small" /></div>}
                     </div>
                     <div style={{ textAlign: "right" }}>
-                      <div style={{
+                      <div className="history-weight" style={{
                         fontSize: 18, fontWeight: 700, fontFamily: "'JetBrains Mono',monospace",
                         color: bag.quantity_on_hand > 180 ? C.warning : C.pass,
                       }}>{bag.quantity_on_hand.toFixed(1)} kg</div>
@@ -1882,7 +1882,7 @@ export default function App() {
   };
 
   return (
-    <div style={{
+    <div className="app-root" style={{
       fontFamily: "'JetBrains Mono','SF Mono','Fira Code',monospace",
       background: C.bg, color: C.text, minHeight: "100vh",
       maxWidth: 960, margin: "0 auto", position: "relative",
@@ -1901,6 +1901,101 @@ export default function App() {
         input::placeholder, textarea::placeholder { color: ${C.textDim}; }
         input:focus, textarea:focus { border-color: ${C.borderFocus} !important; box-shadow: 0 0 12px ${C.accentGlow}; }
         * { box-sizing: border-box; }
+
+        /* ============================================================
+           RESPONSIVE BREAKPOINTS
+           Phone:  < 480px
+           Tablet: 480px - 768px
+           Desktop: > 768px (default)
+           ============================================================ */
+
+        /* Phone styles */
+        @media (max-width: 479px) {
+          /* Tighter padding throughout */
+          .audit-content { padding: 10px 12px !important; }
+          .card-padding { padding: 14px !important; }
+
+          /* Smaller header */
+          .app-header { padding: 10px 12px !important; }
+          .app-header .app-title { font-size: 15px !important; }
+
+          /* Smaller lot number display */
+          .lot-number-large { font-size: 20px !important; letter-spacing: 1px !important; }
+          .weight-large { font-size: 28px !important; }
+
+          /* Stack quality buttons vertically on tiny screens */
+          .quality-buttons { flex-direction: column !important; }
+          .quality-buttons button { width: 100% !important; }
+
+          /* Smaller quality reference photos */
+          .quality-photo img { max-height: 120px !important; }
+
+          /* Full-width modals with less padding */
+          .modal-content { padding: 16px !important; border-radius: 12px !important; }
+          .modal-icon { font-size: 40px !important; }
+          .modal-title { font-size: 14px !important; }
+          .location-name { font-size: 24px !important; letter-spacing: 2px !important; }
+
+          /* Smaller tab bar */
+          .tab-bar button { padding: 8px !important; font-size: 11px !important; }
+
+          /* Compact stats grid */
+          .stats-number { font-size: 22px !important; }
+
+          /* Compact form inputs */
+          input, textarea, select { font-size: 14px !important; padding: 10px 12px !important; }
+          button { font-size: 12px !important; }
+
+          /* Scanned history cards */
+          .history-lot { font-size: 14px !important; }
+          .history-weight { font-size: 16px !important; }
+
+          /* Splash screen */
+          .splash-title { font-size: 36px !important; letter-spacing: 4px !important; }
+          .splash-subtitle { font-size: 18px !important; letter-spacing: 6px !important; }
+        }
+
+        /* Tablet styles */
+        @media (min-width: 480px) and (max-width: 768px) {
+          .audit-content { padding: 14px 16px !important; }
+          .lot-number-large { font-size: 22px !important; }
+          .weight-large { font-size: 32px !important; }
+          .location-name { font-size: 28px !important; }
+          .quality-photo img { max-height: 150px !important; }
+        }
+
+        /* Tablet and above — side-by-side layouts */
+        @media (min-width: 600px) {
+          .scan-form-grid {
+            display: grid !important;
+            grid-template-columns: 1fr 1fr !important;
+            gap: 16px !important;
+          }
+          .scan-form-grid > .full-width {
+            grid-column: 1 / -1 !important;
+          }
+        }
+
+        /* Touch-friendly tap targets for all mobile */
+        @media (max-width: 768px) {
+          button, select, input[type="number"], input[type="text"] {
+            min-height: 44px;
+          }
+          /* Prevent zoom on input focus (iOS) */
+          input, select, textarea {
+            font-size: 16px !important;
+          }
+        }
+
+        /* Safe area insets for notched phones */
+        @supports (padding: env(safe-area-inset-top)) {
+          .app-header {
+            padding-top: max(10px, env(safe-area-inset-top)) !important;
+          }
+          .app-root {
+            padding-bottom: env(safe-area-inset-bottom) !important;
+          }
+        }
       `}</style>
     </div>
   );
