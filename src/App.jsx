@@ -20,7 +20,7 @@ const C = {
 // ============================================================
 // ENVIRONMENT TOGGLE — set to true for test environment
 // ============================================================
-const TEST_MODE = false; // Change to true for testing against CHARM_TEST
+const TEST_MODE = true; // Change to true for testing against CHARM_TEST
 const SITE_CODE = TEST_MODE ? "CHARM_TEST" : "CHARM";
 
 // Charm Industrial logo (transparent PNG, brightened for dark UI)
