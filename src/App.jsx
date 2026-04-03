@@ -460,7 +460,7 @@ function AuditScreen({ onPrintReport, users }) {
   const [pendingCount, setPendingCount] = useState(() => getLocalScanQueue().length + getLocalQueue().filter(q => q._meta?.status === "pending").length);
   const [charTypeOverride, setCharTypeOverride] = useState(null);
   const [showDryConversion, setShowDryConversion] = useState(false);
-  const [moistureContent, setMoistureContent] = useState("");
+  const [moistureReadings, setMoistureReadings] = useState(["", "", ""]); // 3-5 readings
   const [fillLevel, setFillLevel] = useState("80");
   const [conversionMethod, setConversionMethod] = useState("moisture"); // "moisture" or "volumetric"
   const isOnline = useOnlineStatus();
@@ -674,8 +674,11 @@ function AuditScreen({ onPrintReport, users }) {
 
     // Calculate dry weight if moisture conversion was used
     let dryWeight = null;
-    if (moistureContent && conversionMethod === "moisture") {
-      dryWeight = Math.round(currentMatch.quantity_on_hand * (1 - parseFloat(moistureContent) / 100) * 10) / 10;
+    let avgMC = null;
+    const validReadings = moistureReadings.filter(v => v !== "" && !isNaN(parseFloat(v))).map(Number);
+    if (validReadings.length >= 3 && conversionMethod === "moisture") {
+      avgMC = Math.round(validReadings.reduce((a, b) => a + b, 0) / validReadings.length * 10) / 10;
+      dryWeight = Math.round(currentMatch.quantity_on_hand * (1 - avgMC / 100) * 10) / 10;
     } else if (conversionMethod === "volumetric" && fillLevel) {
       dryWeight = Math.round(DRY_BULK_DENSITY * SACK_VOLUME_M3 * parseFloat(fillLevel) / 100 * 10) / 10;
     }
@@ -686,7 +689,8 @@ function AuditScreen({ onPrintReport, users }) {
       char_type: charTypeOverride || currentMatch.char_type || null,
       char_type_original: currentMatch.char_type || null,
       dry_weight: dryWeight,
-      moisture_content: moistureContent ? parseFloat(moistureContent) : null,
+      moisture_readings: validReadings.length > 0 ? validReadings : null,
+      moisture_content: avgMC,
       conversion_method: showDryConversion ? conversionMethod : null,
       reweighKg: parsedReweigh,
       discrepancy: discrepancyNote || (weightChanged ? `Weight changed: ${currentMatch.quantity_on_hand.toFixed(1)} → ${parsedReweigh.toFixed(1)} kg` : null),
@@ -743,7 +747,7 @@ function AuditScreen({ onPrintReport, users }) {
     setLocationRouting(null);
     setCharTypeOverride(null);
     setShowDryConversion(false);
-    setMoistureContent("");
+    setMoistureReadings(["", "", ""]);
     setFillLevel("80");
     setConversionMethod("moisture");
   };
@@ -1444,13 +1448,30 @@ function AuditScreen({ onPrintReport, users }) {
                     {["dry", "wet"].map(ct => (
                       <button key={ct} onClick={() => {
                         setCharTypeOverride(ct);
+                        // Only add note once per change, remove opposite note if present
                         if (ct !== (currentMatch.char_type || "")) {
                           setDiscrepancyNote(prev => {
-                            const note = `Changed to ${ct === "wet" ? "Wet" : "Dry"} Char`;
-                            return prev ? prev + "; " + note : note;
+                            const wetNote = "Changed to Wet Char";
+                            const dryNote = "Changed to Dry Char";
+                            const newNote = ct === "wet" ? wetNote : dryNote;
+                            const removeNote = ct === "wet" ? dryNote : wetNote;
+                            // Remove any existing char type change notes
+                            let cleaned = (prev || "").split("; ").filter(n => n !== wetNote && n !== dryNote).join("; ");
+                            return cleaned ? cleaned + "; " + newNote : newNote;
+                          });
+                        } else {
+                          // Reverted to original — remove change notes
+                          setDiscrepancyNote(prev => {
+                            return (prev || "").split("; ").filter(n => n !== "Changed to Wet Char" && n !== "Changed to Dry Char").join("; ");
                           });
                         }
-                        if (ct === "wet") setShowDryConversion(true);
+                        if (ct === "wet") {
+                          setShowDryConversion(true);
+                        } else {
+                          setShowDryConversion(false);
+                          setMoistureReadings(["", "", ""]);
+                          setFillLevel("80");
+                        }
                       }} style={{
                         padding: "6px 12px", borderRadius: 6, fontSize: 11, fontWeight: 700,
                         fontFamily: "inherit", cursor: "pointer", letterSpacing: 1,
@@ -1496,38 +1517,103 @@ function AuditScreen({ onPrintReport, users }) {
 
                   {conversionMethod === "moisture" ? (
                     <div>
-                      <label style={{ fontSize: 11, color: C.textMuted, letterSpacing: 1, display: "block", marginBottom: 4 }}>
-                        MOISTURE CONTENT (%)
-                      </label>
-                      <input
-                        type="number"
-                        value={moistureContent}
-                        onChange={e => setMoistureContent(e.target.value)}
-                        placeholder="e.g. 25"
-                        min="0" max="80" step="0.1"
-                        style={{
-                          width: "100%", padding: "10px 14px", background: C.bgInput,
-                          border: `1px solid ${C.info}`, borderRadius: 8, color: C.text,
-                          fontSize: 14, fontFamily: "inherit", outline: "none", boxSizing: "border-box",
-                        }}
-                      />
-                      <div style={{ fontSize: 12, color: C.textMuted, marginTop: 4 }}>
-                        Formula: dry_weight = weighed_weight × (1 − MC%)
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                        <label style={{ fontSize: 11, color: C.textMuted, letterSpacing: 1 }}>
+                          MOISTURE READINGS (3–5 SAMPLES)
+                        </label>
+                        {moistureReadings.length < 5 && (
+                          <button onClick={() => setMoistureReadings(prev => [...prev, ""])} style={{
+                            padding: "3px 8px", background: "transparent", border: `1px solid ${C.info}`,
+                            borderRadius: 4, color: C.info, fontSize: 10, fontFamily: "inherit",
+                            cursor: "pointer", fontWeight: 700,
+                          }}>+ ADD</button>
+                        )}
                       </div>
-                      {moistureContent && (
-                        <div style={{
-                          marginTop: 10, padding: "10px 14px", background: C.bgSection,
-                          borderRadius: 6, border: `1px solid ${C.border}`,
-                        }}>
-                          <div style={{ fontSize: 11, color: C.textMuted, letterSpacing: 1 }}>ESTIMATED DRY WEIGHT</div>
-                          <div style={{ fontSize: 24, fontWeight: 900, fontFamily: "'JetBrains Mono',monospace", color: C.accent }}>
-                            {(currentMatch.quantity_on_hand * (1 - parseFloat(moistureContent) / 100)).toFixed(1)} kg
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {moistureReadings.map((val, idx) => (
+                          <div key={idx} style={{ position: "relative", flex: "1 1 60px", minWidth: 60 }}>
+                            <input
+                              type="number"
+                              value={val}
+                              onChange={e => {
+                                const updated = [...moistureReadings];
+                                updated[idx] = e.target.value;
+                                setMoistureReadings(updated);
+                                // Calculate avg and update reweigh
+                                const valid = updated.filter(v => v !== "" && !isNaN(parseFloat(v))).map(Number);
+                                if (valid.length >= 3 && currentMatch) {
+                                  const avg = valid.reduce((a, b) => a + b, 0) / valid.length;
+                                  const dryWt = (currentMatch.quantity_on_hand * (1 - avg / 100)).toFixed(1);
+                                  setReweighValue(dryWt);
+                                  setShowWeightCorrection(true);
+                                }
+                              }}
+                              placeholder={`#${idx + 1}`}
+                              min="0" max="80" step="0.1"
+                              style={{
+                                width: "100%", padding: "8px 10px", background: C.bgInput,
+                                border: `1px solid ${val ? C.info : C.border}`, borderRadius: 6, color: C.text,
+                                fontSize: 13, fontFamily: "'JetBrains Mono',monospace", outline: "none",
+                                boxSizing: "border-box", textAlign: "center",
+                              }}
+                            />
+                            {idx >= 3 && (
+                              <button onClick={() => setMoistureReadings(prev => prev.filter((_, i) => i !== idx))} style={{
+                                position: "absolute", top: -4, right: -4, width: 16, height: 16,
+                                background: C.fail, border: "none", borderRadius: "50%",
+                                color: C.white, fontSize: 10, cursor: "pointer", lineHeight: "16px",
+                                textAlign: "center", padding: 0,
+                              }}>×</button>
+                            )}
                           </div>
-                          <div style={{ fontSize: 11, color: C.textDim, marginTop: 2 }}>
-                            {currentMatch.quantity_on_hand.toFixed(1)} × (1 − {moistureContent}%) = {(currentMatch.quantity_on_hand * (1 - parseFloat(moistureContent) / 100)).toFixed(1)} kg
-                          </div>
-                        </div>
-                      )}
+                        ))}
+                      </div>
+                      {(() => {
+                        const valid = moistureReadings.filter(v => v !== "" && !isNaN(parseFloat(v))).map(Number);
+                        const avg = valid.length > 0 ? valid.reduce((a, b) => a + b, 0) / valid.length : null;
+                        return (
+                          <>
+                            <div style={{ fontSize: 12, color: C.textMuted, marginTop: 8 }}>
+                              Formula: dry_weight = weighed_weight × (1 − avg_MC%)
+                            </div>
+                            {valid.length > 0 && (
+                              <div style={{
+                                marginTop: 8, padding: "8px 12px", background: C.bgSection,
+                                borderRadius: 6, border: `1px solid ${C.border}`,
+                                display: "flex", justifyContent: "space-between", alignItems: "center",
+                              }}>
+                                <div>
+                                  <div style={{ fontSize: 10, color: C.textDim, letterSpacing: 1 }}>AVG MC%</div>
+                                  <div style={{
+                                    fontSize: 18, fontWeight: 700, fontFamily: "'JetBrains Mono',monospace",
+                                    color: valid.length >= 3 ? C.info : C.warning,
+                                  }}>
+                                    {avg.toFixed(1)}%
+                                  </div>
+                                </div>
+                                <div style={{ fontSize: 10, color: valid.length >= 3 ? C.textMuted : C.warning }}>
+                                  {valid.length} of {moistureReadings.length} entered
+                                  {valid.length < 3 && " (min 3 needed)"}
+                                </div>
+                              </div>
+                            )}
+                            {valid.length >= 3 && avg !== null && (
+                              <div style={{
+                                marginTop: 8, padding: "10px 14px", background: C.bgSection,
+                                borderRadius: 6, border: `1px solid ${C.accent}`,
+                              }}>
+                                <div style={{ fontSize: 11, color: C.textMuted, letterSpacing: 1 }}>ESTIMATED DRY WEIGHT</div>
+                                <div style={{ fontSize: 24, fontWeight: 900, fontFamily: "'JetBrains Mono',monospace", color: C.accent }}>
+                                  {(currentMatch.quantity_on_hand * (1 - avg / 100)).toFixed(1)} kg
+                                </div>
+                                <div style={{ fontSize: 11, color: C.textDim, marginTop: 2 }}>
+                                  {currentMatch.quantity_on_hand.toFixed(1)} × (1 − {avg.toFixed(1)}%) = {(currentMatch.quantity_on_hand * (1 - avg / 100)).toFixed(1)} kg
+                                </div>
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                   ) : (
                     <div>
@@ -1538,7 +1624,12 @@ function AuditScreen({ onPrintReport, users }) {
                         <input
                           type="range"
                           value={fillLevel}
-                          onChange={e => setFillLevel(e.target.value)}
+                          onChange={e => {
+                            setFillLevel(e.target.value);
+                            const dryWt = (DRY_BULK_DENSITY * SACK_VOLUME_M3 * parseFloat(e.target.value) / 100).toFixed(1);
+                            setReweighValue(dryWt);
+                            setShowWeightCorrection(true);
+                          }}
                           min="50" max="105" step="1"
                           style={{ flex: 1 }}
                         />
@@ -1755,10 +1846,15 @@ function AuditScreen({ onPrintReport, users }) {
                     "Multiple tags on bag, unsure which one to report",
                   ].map(note => (
                     <button key={note} onClick={() => {
-                      setDiscrepancyNote(prev => prev ? prev + "; " + note : note);
+                      // Only add note if not already present
+                      setDiscrepancyNote(prev => {
+                        const existing = (prev || "").split("; ").filter(Boolean);
+                        if (existing.includes(note)) return prev; // already added
+                        return prev ? prev + "; " + note : note;
+                      });
                       if (note.startsWith("Weight")) setShowWeightCorrection(true);
                       if (note === "Changed to Wet Char") { setCharTypeOverride("wet"); setShowDryConversion(true); }
-                      if (note === "Changed to Dry Char") setCharTypeOverride("dry");
+                      if (note === "Changed to Dry Char") { setCharTypeOverride("dry"); setShowDryConversion(false); }
                       if (note === "Char bag not in inventory") {
                         setNotFoundTag(currentMatch?.scannedTag || tagInput.trim());
                         setShowNotFoundForm(true);
