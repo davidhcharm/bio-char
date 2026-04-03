@@ -33,7 +33,15 @@ async function callManufacturo(path, payload) {
     },
     body: JSON.stringify(payload),
   });
-  return { status: res.status, data: await res.json() };
+  
+  const text = await res.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = { error: text, statusCode: res.status };
+  }
+  return { status: res.status, data };
 }
 
 // ============================================================
