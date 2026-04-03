@@ -734,49 +734,64 @@ function AuditScreen({ onPrintReport, users, testMode, onToggleEnvPanel }) {
     setTimeout(() => setShowSubmitGlow(false), 2000);
     showNotif(`✓ Bag ${bagEntry.lot_number} confirmed — ${bagEntry.quality}`, "success");
 
-    // If weight was corrected, adjust inventory in Manufacturo
-    if (parsedReweigh !== null && weightChanged && currentMatch.lot_number) {
-      const originalQty = currentMatch.quantity_on_hand;
-      const newQty = parsedReweigh;
-      const diff = Math.abs(Math.round((newQty - originalQty) * 10) / 10);
-      const isIncrease = newQty > originalQty;
-
-      const adjustPayload = {
-  type: isIncrease ? "Increase" : "Decrease",
-  siteCode: _siteCode,
-  productCode: "bio_char",
-  productRevision: _siteCode === "CHARM_TEST" ? "NA" : "A",
-  quantityChange: diff,
-  locationCode: currentMatch.location_code || "biochar_dry",
-  lotNumber: currentMatch.lot_number,
-  reasonCode: _siteCode === "CHARM_TEST"
-    ? (isIncrease ? "man_inv_adj_up" : "man_adj_inv_down")
-    : (isIncrease ? "Manual Inventory Adjustment (up)" : "Manual Inventory Adjustment (down)"),
-  ...(currentMatch.itag_code ? { containerITagCode: currentMatch.itag_code } : {}),
-};
-
-      // Fire and forget — don't block the UI
-      (async () => {
-        try {
-          const result = await callAPI("adjustInventory", adjustPayload);
-          if (result && !result.error) {
-            console.log(`[Adjust] ${isIncrease ? "Increased" : "Decreased"} ${currentMatch.lot_number} by ${diff} kg`);
-          } else {
-            console.warn("[Adjust] API returned error:", result);
-            // Queue for retry
-            const queue = getLocalQueue();
-            queue.push({ ...adjustPayload, _meta: { type: "adjust", status: "pending", createdAt: new Date().toISOString() } });
-            saveLocalQueue(queue);
-          }
-        } catch (err) {
-          console.error("[Adjust] Failed:", err);
-          const queue = getLocalQueue();
-          queue.push({ ...adjustPayload, _meta: { type: "adjust", status: "pending", createdAt: new Date().toISOString() } });
-          saveLocalQueue(queue);
-        }
-      })();
+  if (currentMatch.itag_code) {
+  // iTag path — simpler, avoids location/revision issues
+  const adjustPayload = {
+    type: isIncrease ? "Increase" : "Decrease",
+    iTagCode: currentMatch.itag_code,
+    quantityChange: diff,
+    reasonCode: _siteCode === "CHARM_TEST"
+      ? (isIncrease ? "man_inv_adj_up" : "man_adj_inv_down")
+      : (isIncrease ? "Manual Inventory Adjustment (up)" : "Manual Inventory Adjustment (down)"),
+  };
+  
+  // Fire and forget
+  (async () => {
+    try {
+      const result = await callAPI("adjustITag", adjustPayload);
+      if (result && !result.error) {
+        console.log(`[Adjust] iTag ${currentMatch.itag_code} adjusted by ${diff} kg`);
+      } else {
+        console.warn("[Adjust] iTag API error:", result);
+      }
+    } catch (err) {
+      console.error("[Adjust] iTag failed:", err);
     }
+  })();
+} else {
+  // Full inventory path — fallback when no iTag
+  const adjustPayload = {
+    type: isIncrease ? "Increase" : "Decrease",
+    siteCode: _siteCode,
+    productCode: "bio_char",
+    productRevision: _siteCode === "CHARM_TEST" ? "NA" : "A",
+    quantityChange: diff,
+    locationCode: currentMatch.location_code || "biochar_dry",
+    lotNumber: currentMatch.lot_number,
+    reasonCode: _siteCode === "CHARM_TEST"
+      ? (isIncrease ? "man_inv_adj_up" : "man_adj_inv_down")
+      : (isIncrease ? "Manual Inventory Adjustment (up)" : "Manual Inventory Adjustment (down)"),
+  };
 
+  (async () => {
+    try {
+      const result = await callAPI("adjustInventory", adjustPayload);
+      if (result && !result.error) {
+        console.log(`[Adjust] ${currentMatch.lot_number} adjusted by ${diff} kg`);
+      } else {
+        console.warn("[Adjust] API error:", result);
+        const queue = getLocalQueue();
+        queue.push({ ...adjustPayload, _meta: { type: "adjust", status: "pending", createdAt: new Date().toISOString() } });
+        saveLocalQueue(queue);
+      }
+    } catch (err) {
+      console.error("[Adjust] Failed:", err);
+      const queue = getLocalQueue();
+      queue.push({ ...adjustPayload, _meta: { type: "adjust", status: "pending", createdAt: new Date().toISOString() } });
+      saveLocalQueue(queue);
+    }
+  })();
+}
     // Show location routing pop-up
     const routing = LOCATION_ROUTING[selectedQuality] || LOCATION_ROUTING["Unknown"];
     setLocationRouting({
