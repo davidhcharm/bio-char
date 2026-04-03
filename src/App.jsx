@@ -742,7 +742,7 @@ if (parsedReweigh !== null && weightChanged && currentMatch.lot_number) {
   const diff = Math.abs(Math.round((newQty - originalQty) * 10) / 10);
   const isIncrease = newQty > originalQty;
     
-    if (currentMatch.itag_code) {
+  if (false) {
   // iTag path — simpler, avoids location/revision issues
   const adjustPayload = {
     type: isIncrease ? "Increase" : "Decrease",
@@ -774,7 +774,7 @@ if (parsedReweigh !== null && weightChanged && currentMatch.lot_number) {
     productCode: "bio_char",
     productRevision: _siteCode === "CHARM_TEST" ? "NA" : "A",
     quantityChange: diff,
-    locationCode: currentMatch.location_code || "biochar_dry",
+    locationCode: currentMatch.location || "char_dry",
     lotNumber: currentMatch.lot_number,
     reasonCode: _siteCode === "CHARM_TEST"
       ? (isIncrease ? "man_inv_adj_up" : "man_adj_inv_down")
