@@ -109,6 +109,10 @@ const LOCATION_ROUTING = {
   "Unknown":              { location: "Location C", color: C.fail, icon: "🗑" },
 };
 
+// Dry weight conversion constants
+const SACK_VOLUME_M3 = 1.0668 * 1.0668 * 1.397; // 42" x 42" x 55" in meters
+const DRY_BULK_DENSITY = 141; // kg/m³ for biochar
+
 // Local queue for failed/offline inventory creation attempts
 const QUEUE_KEY = "biochar_create_queue";
 const SCAN_QUEUE_KEY = "biochar_scan_queue";
@@ -454,6 +458,11 @@ function AuditScreen({ onPrintReport, users }) {
   const [isCreating, setIsCreating] = useState(false);
   const [locationRouting, setLocationRouting] = useState(null);
   const [pendingCount, setPendingCount] = useState(() => getLocalScanQueue().length + getLocalQueue().filter(q => q._meta?.status === "pending").length);
+  const [charTypeOverride, setCharTypeOverride] = useState(null);
+  const [showDryConversion, setShowDryConversion] = useState(false);
+  const [moistureContent, setMoistureContent] = useState("");
+  const [fillLevel, setFillLevel] = useState("80");
+  const [conversionMethod, setConversionMethod] = useState("moisture"); // "moisture" or "volumetric"
   const isOnline = useOnlineStatus();
   const inputRef = useRef(null);
 
@@ -623,6 +632,7 @@ function AuditScreen({ onPrintReport, users }) {
       auto_converted: autoConverted,
       location: match.location || "Unknown",
       production_date: match.production_date || null,
+      char_type: match.char_type || null,
       scannedTag: cleanTag,
       timestamp: new Date().toISOString(),
     });
@@ -637,6 +647,8 @@ function AuditScreen({ onPrintReport, users }) {
     setSelectedQuality("");
     setDiscrepancyNote("");
     setReweighValue("");
+    setCharTypeOverride(null);
+    setShowDryConversion(false);
   };
 
   // Opens the review modal instead of immediately confirming
@@ -655,13 +667,27 @@ function AuditScreen({ onPrintReport, users }) {
   // Called from ReviewModal after user checks off + approver selected (if duplicate)
   const handleConfirmBag = (approverId) => {
     const parsedReweigh = reweighValue ? parseFloat(reweighValue) : null;
-    // Mark as altered if: discrepancy note exists, OR re-weigh differs from original weight
+    // Mark as altered if: discrepancy note exists, OR re-weigh differs from original weight, OR char type changed
     const weightChanged = parsedReweigh !== null && Math.abs(parsedReweigh - currentMatch.quantity_on_hand) > 0.05;
-    const isAltered = !!(discrepancyNote || weightChanged);
+    const charTypeChanged = charTypeOverride && charTypeOverride !== currentMatch.char_type;
+    const isAltered = !!(discrepancyNote || weightChanged || charTypeChanged);
+
+    // Calculate dry weight if moisture conversion was used
+    let dryWeight = null;
+    if (moistureContent && conversionMethod === "moisture") {
+      dryWeight = Math.round(currentMatch.quantity_on_hand * (1 - parseFloat(moistureContent) / 100) * 10) / 10;
+    } else if (conversionMethod === "volumetric" && fillLevel) {
+      dryWeight = Math.round(DRY_BULK_DENSITY * SACK_VOLUME_M3 * parseFloat(fillLevel) / 100 * 10) / 10;
+    }
 
     const bagEntry = {
       ...currentMatch,
       quality: selectedQuality,
+      char_type: charTypeOverride || currentMatch.char_type || null,
+      char_type_original: currentMatch.char_type || null,
+      dry_weight: dryWeight,
+      moisture_content: moistureContent ? parseFloat(moistureContent) : null,
+      conversion_method: showDryConversion ? conversionMethod : null,
       reweighKg: parsedReweigh,
       discrepancy: discrepancyNote || (weightChanged ? `Weight changed: ${currentMatch.quantity_on_hand.toFixed(1)} → ${parsedReweigh.toFixed(1)} kg` : null),
       status: isAltered ? "altered" : "reported",
@@ -715,6 +741,11 @@ function AuditScreen({ onPrintReport, users }) {
     setNewBagQuality("");
     setNewBagNotes("");
     setLocationRouting(null);
+    setCharTypeOverride(null);
+    setShowDryConversion(false);
+    setMoistureContent("");
+    setFillLevel("80");
+    setConversionMethod("moisture");
   };
 
   const formFilled = currentMatch && selectedQuality && (!weightWarning || reweighValue);
@@ -1390,6 +1421,149 @@ function AuditScreen({ onPrintReport, users }) {
                 </div>
               )}
 
+              {/* Char Type (Wet/Dry) */}
+              <div style={{
+                background: C.bgSection, border: `1px solid ${C.border}`,
+                borderRadius: 8, padding: "10px 16px", marginBottom: 16,
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: C.textMuted, letterSpacing: 2, marginBottom: 4 }}>CHAR TYPE</div>
+                    <div style={{
+                      fontSize: 14, fontWeight: 700, fontFamily: "'JetBrains Mono',monospace",
+                      color: (charTypeOverride || currentMatch.char_type) === "wet" ? C.info : (charTypeOverride || currentMatch.char_type) === "dry" ? C.accent : C.textDim,
+                      textTransform: "uppercase",
+                    }}>
+                      {charTypeOverride || currentMatch.char_type || "Not set"}
+                      {charTypeOverride && charTypeOverride !== currentMatch.char_type && (
+                        <span style={{ fontSize: 10, color: C.warning, marginLeft: 8 }}>CHANGED</span>
+                      )}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    {["dry", "wet"].map(ct => (
+                      <button key={ct} onClick={() => {
+                        setCharTypeOverride(ct);
+                        if (ct !== (currentMatch.char_type || "")) {
+                          setDiscrepancyNote(prev => {
+                            const note = `Changed to ${ct === "wet" ? "Wet" : "Dry"} Char`;
+                            return prev ? prev + "; " + note : note;
+                          });
+                        }
+                        if (ct === "wet") setShowDryConversion(true);
+                      }} style={{
+                        padding: "6px 12px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+                        fontFamily: "inherit", cursor: "pointer", letterSpacing: 1,
+                        textTransform: "uppercase",
+                        background: (charTypeOverride || currentMatch.char_type) === ct
+                          ? (ct === "dry" ? C.accent : C.info) : C.bgInput,
+                        color: (charTypeOverride || currentMatch.char_type) === ct ? C.bg : C.textMuted,
+                        border: `1px solid ${(charTypeOverride || currentMatch.char_type) === ct
+                          ? (ct === "dry" ? C.accent : C.info) : C.border}`,
+                        transition: "all 0.2s",
+                      }}>{ct}</button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Dry Weight Conversion (shows when char is wet) */}
+              {((charTypeOverride || currentMatch.char_type) === "wet" || showDryConversion) && (
+                <div style={{
+                  background: C.infoGlow, border: `1px solid ${C.info}`,
+                  borderRadius: 8, padding: 16, marginBottom: 16,
+                }}>
+                  <div style={{ fontSize: 11, color: C.info, letterSpacing: 2, fontWeight: 700, marginBottom: 12 }}>
+                    DRY WEIGHT CONVERSION
+                  </div>
+
+                  {/* Method selector */}
+                  <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+                    {[
+                      { key: "moisture", label: "Moisture %" },
+                      { key: "volumetric", label: "Volumetric" },
+                    ].map(m => (
+                      <button key={m.key} onClick={() => setConversionMethod(m.key)} style={{
+                        padding: "6px 14px", borderRadius: 6, fontSize: 11, fontWeight: 600,
+                        fontFamily: "inherit", cursor: "pointer",
+                        background: conversionMethod === m.key ? C.info : C.bgSection,
+                        color: conversionMethod === m.key ? C.bg : C.textMuted,
+                        border: `1px solid ${conversionMethod === m.key ? C.info : C.border}`,
+                        transition: "all 0.2s",
+                      }}>{m.label}</button>
+                    ))}
+                  </div>
+
+                  {conversionMethod === "moisture" ? (
+                    <div>
+                      <label style={{ fontSize: 11, color: C.textMuted, letterSpacing: 1, display: "block", marginBottom: 4 }}>
+                        MOISTURE CONTENT (%)
+                      </label>
+                      <input
+                        type="number"
+                        value={moistureContent}
+                        onChange={e => setMoistureContent(e.target.value)}
+                        placeholder="e.g. 25"
+                        min="0" max="80" step="0.1"
+                        style={{
+                          width: "100%", padding: "10px 14px", background: C.bgInput,
+                          border: `1px solid ${C.info}`, borderRadius: 8, color: C.text,
+                          fontSize: 14, fontFamily: "inherit", outline: "none", boxSizing: "border-box",
+                        }}
+                      />
+                      <div style={{ fontSize: 12, color: C.textMuted, marginTop: 4 }}>
+                        Formula: dry_weight = weighed_weight × (1 − MC%)
+                      </div>
+                      {moistureContent && (
+                        <div style={{
+                          marginTop: 10, padding: "10px 14px", background: C.bgSection,
+                          borderRadius: 6, border: `1px solid ${C.border}`,
+                        }}>
+                          <div style={{ fontSize: 11, color: C.textMuted, letterSpacing: 1 }}>ESTIMATED DRY WEIGHT</div>
+                          <div style={{ fontSize: 24, fontWeight: 900, fontFamily: "'JetBrains Mono',monospace", color: C.accent }}>
+                            {(currentMatch.quantity_on_hand * (1 - parseFloat(moistureContent) / 100)).toFixed(1)} kg
+                          </div>
+                          <div style={{ fontSize: 11, color: C.textDim, marginTop: 2 }}>
+                            {currentMatch.quantity_on_hand.toFixed(1)} × (1 − {moistureContent}%) = {(currentMatch.quantity_on_hand * (1 - parseFloat(moistureContent) / 100)).toFixed(1)} kg
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div>
+                      <label style={{ fontSize: 11, color: C.textMuted, letterSpacing: 1, display: "block", marginBottom: 4 }}>
+                        FILL LEVEL (%)
+                      </label>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <input
+                          type="range"
+                          value={fillLevel}
+                          onChange={e => setFillLevel(e.target.value)}
+                          min="50" max="105" step="1"
+                          style={{ flex: 1 }}
+                        />
+                        <span style={{ fontSize: 14, fontWeight: 700, color: C.text, minWidth: 40 }}>{fillLevel}%</span>
+                      </div>
+                      <div style={{ fontSize: 12, color: C.textMuted, marginTop: 4 }}>
+                        Sack: 42″×42″×55″ = {SACK_VOLUME_M3.toFixed(3)} m³ | Density: {DRY_BULK_DENSITY} kg/m³
+                      </div>
+                      <div style={{
+                        marginTop: 10, padding: "10px 14px", background: C.bgSection,
+                        borderRadius: 6, border: `1px solid ${C.border}`,
+                      }}>
+                        <div style={{ fontSize: 11, color: C.textMuted, letterSpacing: 1 }}>ESTIMATED DRY WEIGHT (VOLUMETRIC)</div>
+                        <div style={{ fontSize: 24, fontWeight: 900, fontFamily: "'JetBrains Mono',monospace", color: C.accent }}>
+                          {(DRY_BULK_DENSITY * SACK_VOLUME_M3 * parseFloat(fillLevel) / 100).toFixed(1)} kg
+                        </div>
+                        <div style={{ fontSize: 11, color: C.textDim, marginTop: 2 }}>
+                          {DRY_BULK_DENSITY} × {(SACK_VOLUME_M3 * parseFloat(fillLevel) / 100).toFixed(3)} m³ ({fillLevel}% fill)
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Weight Display */}
               <div style={{
                 background: weightWarning ? C.warningGlow : C.bgSection,
@@ -1575,11 +1749,16 @@ function AuditScreen({ onPrintReport, users }) {
                     "Quality issue noted",
                     "Weight in wrong units",
                     "Weight is incorrect",
+                    "Char bag not in inventory",
+                    "Changed to Wet Char",
+                    "Changed to Dry Char",
                     "Multiple tags on bag, unsure which one to report",
                   ].map(note => (
                     <button key={note} onClick={() => {
                       setDiscrepancyNote(prev => prev ? prev + "; " + note : note);
                       if (note.startsWith("Weight")) setShowWeightCorrection(true);
+                      if (note === "Changed to Wet Char") { setCharTypeOverride("wet"); setShowDryConversion(true); }
+                      if (note === "Changed to Dry Char") setCharTypeOverride("dry");
                     }} style={{
                       padding: "6px 12px", background: C.bgSection, border: `1px solid ${C.border}`,
                       borderRadius: 6, color: C.textMuted, fontSize: 11, fontFamily: "inherit",
