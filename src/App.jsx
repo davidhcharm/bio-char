@@ -745,9 +745,9 @@ function AuditScreen({ onPrintReport, users, testMode, onToggleEnvPanel }) {
         type: isIncrease ? "Increase" : "Decrease",
         siteCode: _siteCode,
         productCode: "bio_char",
-        productRevision: "A",
+        productRevision: _siteCode === "CHARM_TEST" ? "NA" : "A",
         quantityChange: diff,
-        locationCode: currentMatch.location || "char_dry",
+        locationCode: currentMatch.location_code || "biochar_dry",
         lotNumber: currentMatch.lot_number,
         containerITagCode: currentMatch.itag_code || null,
         reasonCode: isIncrease
