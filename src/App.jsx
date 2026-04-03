@@ -747,7 +747,7 @@ function AuditScreen({ onPrintReport, users, testMode, onToggleEnvPanel }) {
   productCode: "bio_char",
   productRevision: _siteCode === "CHARM_TEST" ? "NA" : "A",
   quantityChange: diff,
-  locationCode: currentMatch.location_code || "biochar_dry",
+  locationCode: currentMatch.location_code || (_siteCode === "CHARM_TEST" ? "char_testing" : "char_dry"),
   lotNumber: currentMatch.lot_number,
   reasonCode: _siteCode === "CHARM_TEST"
     ? (isIncrease ? "man_inv_adj_up" : "man_adj_inv_down")
