@@ -798,6 +798,7 @@ if (parsedReweigh !== null && weightChanged && currentMatch.lot_number) {
     }
   })();
 }
+}
     // Show location routing pop-up
     const routing = LOCATION_ROUTING[selectedQuality] || LOCATION_ROUTING["Unknown"];
     setLocationRouting({
