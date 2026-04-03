@@ -782,7 +782,7 @@ if (_siteCode !== "CHARM_TEST") {
     productCode: "bio_char",
     productRevision: _siteCode === "CHARM_TEST" ? "NA" : "A",
     quantityChange: diff,
-    locationCode: currentMatch.location || "char_dry",
+    locationCode: currentMatch.location || "biochar_dry",
     lotNumber: currentMatch.lot_number,
     reasonCode: _siteCode === "CHARM_TEST"
       ? (isIncrease ? "man_inv_adj_up" : "man_adj_inv_down")
