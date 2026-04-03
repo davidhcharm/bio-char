@@ -1759,6 +1759,10 @@ function AuditScreen({ onPrintReport, users }) {
                       if (note.startsWith("Weight")) setShowWeightCorrection(true);
                       if (note === "Changed to Wet Char") { setCharTypeOverride("wet"); setShowDryConversion(true); }
                       if (note === "Changed to Dry Char") setCharTypeOverride("dry");
+                      if (note === "Char bag not in inventory") {
+                        setNotFoundTag(currentMatch?.scannedTag || tagInput.trim());
+                        setShowNotFoundForm(true);
+                      }
                     }} style={{
                       padding: "6px 12px", background: C.bgSection, border: `1px solid ${C.border}`,
                       borderRadius: 6, color: C.textMuted, fontSize: 11, fontFamily: "inherit",
