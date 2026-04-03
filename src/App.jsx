@@ -744,14 +744,22 @@ if (parsedReweigh !== null && weightChanged && currentMatch.lot_number) {
     
   if (false) {
   // iTag path — simpler, avoids location/revision issues
-  const adjustPayload = {
-    type: isIncrease ? "Increase" : "Decrease",
-    iTagCode: currentMatch.itag_code,
-    quantityChange: diff,
-    reasonCode: _siteCode === "CHARM_TEST"
-      ? (isIncrease ? "man_inv_adj_up" : "man_adj_inv_down")
-      : (isIncrease ? "Manual Inventory Adjustment (up)" : "Manual Inventory Adjustment (down)"),
-  };
+ const adjustPayload = {
+  type: isIncrease ? "Increase" : "Decrease",
+  siteCode: _siteCode,
+  productCode: "bio_char",
+  quantityChange: diff,
+  locationCode: currentMatch.location_code || "biochar_dry",
+  lotNumber: currentMatch.lot_number,
+  reasonCode: _siteCode === "CHARM_TEST"
+    ? (isIncrease ? "man_inv_adj_up" : "man_adj_inv_down")
+    : (isIncrease ? "Manual Inventory Adjustment (up)" : "Manual Inventory Adjustment (down)"),
+};
+
+// Only include productRevision for production (CHARM_TEST uses "NA" which may not work)
+if (_siteCode !== "CHARM_TEST") {
+  adjustPayload.productRevision = "A";
+}
   
   // Fire and forget
   (async () => {
