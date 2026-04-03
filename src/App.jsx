@@ -750,9 +750,9 @@ function AuditScreen({ onPrintReport, users, testMode, onToggleEnvPanel }) {
         locationCode: currentMatch.location_code || "biochar_dry",
         lotNumber: currentMatch.lot_number,
         containerITagCode: currentMatch.itag_code || null,
-        reasonCode: isIncrease
-          ? "Manual Inventory Adjustment (up)"
-          : "Manual Inventory Adjustment (down)",
+        reasonCode: _siteCode === "CHARM_TEST"
+       ? (isIncrease ? "man_inv_adj_up" : "man_adj_inv_down")
+       : (isIncrease ? "Manual Inventory Adjustment (up)" : "Manual Inventory Adjustment (down)"),
       };
 
       // Fire and forget — don't block the UI
