@@ -796,7 +796,7 @@ function AuditScreen({ onPrintReport, users }) {
     const productionDate = selectedPP ? selectedPP.start : new Date().toISOString().split("T")[0];
 
     const createPayload = {
-      siteCode: "CHARM",
+      siteCode: SITE_CODE,
       productCode: "bio_char",
       productRevision: "A",
       lotNo: notFoundTag,
