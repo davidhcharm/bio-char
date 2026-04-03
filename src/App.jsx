@@ -734,7 +734,13 @@ function AuditScreen({ onPrintReport, users, testMode, onToggleEnvPanel }) {
     setTimeout(() => setShowSubmitGlow(false), 2000);
     showNotif(`✓ Bag ${bagEntry.lot_number} confirmed — ${bagEntry.quality}`, "success");
 
-  if (currentMatch.itag_code) {
+if (parsedReweigh !== null && weightChanged && currentMatch.lot_number) {
+  const originalQty = currentMatch.quantity_on_hand;
+  const newQty = parsedReweigh;
+  const diff = Math.abs(Math.round((newQty - originalQty) * 10) / 10);
+  const isIncrease = newQty > originalQty;
+    
+    if (currentMatch.itag_code) {
   // iTag path — simpler, avoids location/revision issues
   const adjustPayload = {
     type: isIncrease ? "Increase" : "Decrease",
