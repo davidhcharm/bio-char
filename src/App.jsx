@@ -742,18 +742,18 @@ function AuditScreen({ onPrintReport, users, testMode, onToggleEnvPanel }) {
       const isIncrease = newQty > originalQty;
 
       const adjustPayload = {
-        type: isIncrease ? "Increase" : "Decrease",
-        siteCode: _siteCode,
-        productCode: "bio_char",
-        productRevision: _siteCode === "CHARM_TEST" ? "NA" : "A",
-        quantityChange: diff,
-        locationCode: currentMatch.location_code || "biochar_dry",
-        lotNumber: currentMatch.lot_number,
-        containerITagCode: currentMatch.itag_code || null,
-        reasonCode: _siteCode === "CHARM_TEST"
-       ? (isIncrease ? "man_inv_adj_up" : "man_adj_inv_down")
-       : (isIncrease ? "Manual Inventory Adjustment (up)" : "Manual Inventory Adjustment (down)"),
-      };
+  type: isIncrease ? "Increase" : "Decrease",
+  siteCode: _siteCode,
+  productCode: "bio_char",
+  productRevision: _siteCode === "CHARM_TEST" ? "NA" : "A",
+  quantityChange: diff,
+  locationCode: currentMatch.location_code || "biochar_dry",
+  lotNumber: currentMatch.lot_number,
+  reasonCode: _siteCode === "CHARM_TEST"
+    ? (isIncrease ? "man_inv_adj_up" : "man_adj_inv_down")
+    : (isIncrease ? "Manual Inventory Adjustment (up)" : "Manual Inventory Adjustment (down)"),
+  ...(currentMatch.itag_code ? { containerITagCode: currentMatch.itag_code } : {}),
+};
 
       // Fire and forget — don't block the UI
       (async () => {
