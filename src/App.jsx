@@ -654,18 +654,20 @@ function AuditScreen({ onPrintReport, users, testMode, onToggleEnvPanel }) {
       autoConverted = true;
     }
 
-    setCurrentMatch({
-      lot_number: match.lot_number,
-      prod_code: match.product_code,
-      quantity_on_hand: quantity,
-      quantity_original: match.quantity_on_hand,
-      auto_converted: autoConverted,
-      location: match.location || "Unknown",
-      production_date: match.production_date || null,
-      char_type: match.char_type || null,
-      scannedTag: cleanTag,
-      timestamp: new Date().toISOString(),
-    });
+   setCurrentMatch({
+  lot_number: match.lot_number,
+  prod_code: match.product_code,
+  quantity_on_hand: quantity,
+  quantity_original: match.quantity_on_hand,
+  auto_converted: autoConverted,
+  location: match.location || "Unknown",
+  location_code: match.location_code || null,
+  itag_code: match.itag_code || null,
+  production_date: match.production_date || null,
+  char_type: match.char_type || null,
+  scannedTag: cleanTag,
+  timestamp: new Date().toISOString(),
+});
 
     // Weight threshold check — require re-weigh if auto-converted OR if still >180 (pre-Oct 2025 bags)
     if (autoConverted) {
