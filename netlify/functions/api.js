@@ -25,11 +25,16 @@ async function callRetoolWorkflow(action, payload) {
 // Helper: Call Manufacturo REST API (direct)
 // ============================================================
 async function callManufacturo(path, payload) {
+  // Use test key for CHARM_TEST, production key for CHARM
+  const apiKey = payload?.siteCode === "CHARM_TEST"
+    ? process.env.MANUFACTUROTEST_API_KEY
+    : MANUFACTURO_API_KEY;
+
   const res = await fetch(`${MANUFACTURO_BASE}${path}`, {
     method: 'POST',
     headers: {
       'Content-Type': MANUFACTURO_CT,
-      'X-Api-Key': MANUFACTURO_API_KEY,
+      'X-Api-Key': apiKey,
     },
     body: JSON.stringify(payload),
   });
