@@ -592,7 +592,7 @@ function AuditScreen({ onPrintReport, users }) {
     }
 
     // Call Retool Workflow for lookup
-    const lookupResult = await callAPI("lookupTag", { tag: cleanTag });
+    const lookupResult = await callAPI("lookupTag", { tag: cleanTag, siteCode: SITE_CODE });
     const matches = lookupResult?.data || [];
 
     if (!matches.length) {
@@ -602,7 +602,7 @@ function AuditScreen({ onPrintReport, users }) {
     }
 
     // Call Retool Workflow for duplicate check
-    const dupResult = await callAPI("checkDuplicate", { tag: cleanTag });
+    const dupResult = await callAPI("checkDuplicate", { tag: cleanTag, siteCode: SITE_CODE });
     const dupData = dupResult?.data || [];
     const hasInventoryDuplicate = dupData.length > 0;
 
@@ -1313,6 +1313,13 @@ function AuditScreen({ onPrintReport, users }) {
               padding: "4px 8px", borderRadius: 6, letterSpacing: 1,
               animation: "pulse 2s ease-in-out infinite",
             }}>📴 OFFLINE</div>
+          )}
+         
+          {TEST_MODE && (
+            <div style={{
+              fontSize: 10, fontWeight: 700, color: C.bg, background: C.fail,
+              padding: "4px 8px", borderRadius: 6, letterSpacing: 1,
+            }}>TEST</div>
           )}
           {pendingCount > 0 && (
             <div style={{
