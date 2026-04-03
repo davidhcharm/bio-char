@@ -20,7 +20,7 @@ const C = {
 // ============================================================
 // ENVIRONMENT TOGGLE — set to true for test environment
 // ============================================================
-const TEST_MODE = true; // Change to true for testing against CHARM_TEST
+const TEST_MODE = false; // Change to true for testing against CHARM_TEST
 const SITE_CODE = TEST_MODE ? "CHARM_TEST" : "CHARM";
 
 // Charm Industrial logo (transparent PNG, brightened for dark UI)
@@ -488,7 +488,7 @@ function AuditScreen({ onPrintReport, users }) {
         const remaining = [];
         for (const item of scanQueue) {
           try {
-            const lookupResult = await callAPI("lookupTag", { tag: item.scannedTag });
+            const lookupResult = await callAPI("lookupTag", { tag: item.scannedTag, siteCode: SITE_CODE });
             const matches = lookupResult?.data || [];
             if (matches.length > 0) {
               // Update the session bag with real data
@@ -710,6 +710,49 @@ function AuditScreen({ onPrintReport, users }) {
     setTimeout(() => setShowSubmitGlow(false), 2000);
     showNotif(`✓ Bag ${bagEntry.lot_number} confirmed — ${bagEntry.quality}`, "success");
 
+    // If weight was corrected, adjust inventory in Manufacturo
+    if (parsedReweigh !== null && weightChanged && currentMatch.lot_number) {
+      const originalQty = currentMatch.quantity_on_hand;
+      const newQty = parsedReweigh;
+      const diff = Math.abs(Math.round((newQty - originalQty) * 10) / 10);
+      const isIncrease = newQty > originalQty;
+
+      const adjustPayload = {
+        type: isIncrease ? "Increase" : "Decrease",
+        siteCode: SITE_CODE,
+        productCode: "bio_char",
+        productRevision: "A",
+        quantityChange: diff,
+        locationCode: currentMatch.location || "char_dry",
+        lotNumber: currentMatch.lot_number,
+        containerITagCode: currentMatch.itag_code || null,
+        reasonCode: isIncrease
+          ? "Manual Inventory Adjustment (up)"
+          : "Manual Inventory Adjustment (down)",
+      };
+
+      // Fire and forget — don't block the UI
+      (async () => {
+        try {
+          const result = await callAPI("adjustInventory", adjustPayload);
+          if (result && !result.error) {
+            console.log(`[Adjust] ${isIncrease ? "Increased" : "Decreased"} ${currentMatch.lot_number} by ${diff} kg`);
+          } else {
+            console.warn("[Adjust] API returned error:", result);
+            // Queue for retry
+            const queue = getLocalQueue();
+            queue.push({ ...adjustPayload, _meta: { type: "adjust", status: "pending", createdAt: new Date().toISOString() } });
+            saveLocalQueue(queue);
+          }
+        } catch (err) {
+          console.error("[Adjust] Failed:", err);
+          const queue = getLocalQueue();
+          queue.push({ ...adjustPayload, _meta: { type: "adjust", status: "pending", createdAt: new Date().toISOString() } });
+          saveLocalQueue(queue);
+        }
+      })();
+    }
+
     // Show location routing pop-up
     const routing = LOCATION_ROUTING[selectedQuality] || LOCATION_ROUTING["Unknown"];
     setLocationRouting({
@@ -796,7 +839,7 @@ function AuditScreen({ onPrintReport, users }) {
     const productionDate = selectedPP ? selectedPP.start : new Date().toISOString().split("T")[0];
 
     const createPayload = {
-      siteCode: SITE_CODE,
+      siteCode: "CHARM",
       productCode: "bio_char",
       productRevision: "A",
       lotNo: notFoundTag,
@@ -1314,7 +1357,6 @@ function AuditScreen({ onPrintReport, users }) {
               animation: "pulse 2s ease-in-out infinite",
             }}>📴 OFFLINE</div>
           )}
-         
           {TEST_MODE && (
             <div style={{
               fontSize: 10, fontWeight: 700, color: C.bg, background: C.fail,
