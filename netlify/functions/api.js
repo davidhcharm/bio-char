@@ -57,6 +57,28 @@ exports.handler = async (event) => {
       };
     }
 
+    // ---- Manufacturo direct API: Adjust Inventory ----
+    if (endpoint === 'adjustInventory') {
+      const res = await fetch(
+        `${MANUFACTURO_BASE}/eworkin-plus/inventory/api/integrations/inventory/adjust`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json;odata.metadata=minimal;odata.streaming=true',
+            'X-Api-Key': MANUFACTURO_API_KEY,
+          },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      const data = await res.json();
+      return {
+        statusCode: res.status,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      };
+    }
+
     return {
       statusCode: 400,
       body: JSON.stringify({ error: `Unknown endpoint: ${endpoint}` }),
