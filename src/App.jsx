@@ -749,7 +749,7 @@ if (parsedReweigh !== null && weightChanged && currentMatch.lot_number) {
   siteCode: _siteCode,
   productCode: "bio_char",
   quantityChange: diff,
-  locationCode: currentMatch.location_code || "biochar_dry",
+  locationCode: _siteCode === "CHARM_TEST" ? "biochar_dry" : (currentMatch.location_code || "biochar_dry"),
   lotNumber: currentMatch.lot_number,
   reasonCode: _siteCode === "CHARM_TEST"
     ? (isIncrease ? "man_inv_adj_up" : "man_adj_inv_down")
@@ -781,7 +781,7 @@ if (_siteCode !== "CHARM_TEST") {
     siteCode: _siteCode,
     productCode: "bio_char",
     quantityChange: diff,
-    locationCode: currentMatch.location_code || "biochar_dry",
+    locationCode: _siteCode === "CHARM_TEST" ? "biochar_dry" : (currentMatch.location_code || "biochar_dry"),
     lotNumber: currentMatch.lot_number,
     reasonCode: _siteCode === "CHARM_TEST"
       ? (isIncrease ? "man_inv_adj_up" : "man_adj_inv_down")
