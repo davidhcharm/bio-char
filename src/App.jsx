@@ -756,10 +756,8 @@ if (parsedReweigh !== null && weightChanged && currentMatch.lot_number) {
     : (isIncrease ? "Manual Inventory Adjustment (up)" : "Manual Inventory Adjustment (down)"),
 };
 
-// Only include productRevision for production (CHARM_TEST uses "NA" which may not work)
-if (_siteCode !== "CHARM_TEST") {
-  adjustPayload.productRevision = "A";
-}
+// Always include productRevision — required by adjust endpoint
+adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
   
   // Fire and forget
   (async () => {
@@ -788,10 +786,8 @@ if (_siteCode !== "CHARM_TEST") {
       : (isIncrease ? "Manual Inventory Adjustment (up)" : "Manual Inventory Adjustment (down)"),
   };
 
-  // Only include productRevision for production — CHARM_TEST "NA" causes "Inventory not found"
-  if (_siteCode !== "CHARM_TEST") {
-    adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
-  }
+  // Always include productRevision — required by adjust endpoint
+  adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
 
   (async () => {
     try {
