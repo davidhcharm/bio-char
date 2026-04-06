@@ -790,7 +790,7 @@ if (_siteCode !== "CHARM_TEST") {
 
   // Only include productRevision for production — CHARM_TEST "NA" causes "Inventory not found"
   if (_siteCode !== "CHARM_TEST") {
-    adjustPayload.productRevision = "A";
+    adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
   }
 
   (async () => {
