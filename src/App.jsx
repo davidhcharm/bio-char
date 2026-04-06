@@ -535,32 +535,8 @@ function AuditScreen({ onPrintReport, users, testMode, onToggleEnvPanel }) {
         }
       }
 
-      // 2. Retry pending create inventory queue
-      const createQueue = getLocalQueue();
-      let createSynced = 0;
-      const updatedQueue = [];
-      for (const item of createQueue) {
-        if (item._meta?.status !== "pending") {
-          updatedQueue.push(item);
-          continue;
-        }
-        try {
-          const result = await callAPI("createInventory", { requests: [item] });
-          if (result && !result.error) {
-            updatedQueue.push({ ...item, _meta: { ...item._meta, status: "submitted" } });
-            createSynced++;
-          } else {
-            updatedQueue.push(item);
-          }
-        } catch {
-          updatedQueue.push(item);
-        }
-      }
-      saveLocalQueue(updatedQueue);
-      if (createSynced > 0) {
-        showNotif(`✓ Synced ${createSynced} pending inventory creation${createSynced > 1 ? "s" : ""}`, "success");
-      }
-
+      // 2. Create queue is now manual batch-submit only — no auto-sync
+      // Update pending count
       setPendingCount(getLocalScanQueue().length + getLocalQueue().filter(q => q._meta?.status === "pending").length);
     };
 
@@ -789,6 +765,11 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
   // Always include productRevision — required by adjust endpoint
   adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
 
+  // Include containerITagCode if the inventory record has one
+  if (currentMatch.itag_code) {
+    adjustPayload.containerITagCode = currentMatch.itag_code;
+  }
+
   (async () => {
     try {
       const result = await callAPI("adjustInventory", adjustPayload);
@@ -895,9 +876,9 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
     const productionDate = selectedPP ? selectedPP.start : new Date().toISOString().split("T")[0];
 
     const createPayload = {
-      siteCode: "CHARM",
+      siteCode: _siteCode,
       productCode: "bio_char",
-      productRevision: "A",
+      productRevision: _siteCode === "CHARM_TEST" ? "NA" : "A",
       lotNo: notFoundTag,
       quantity: weightKg,
       status: "AVAILABLE",
@@ -909,6 +890,17 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
         },
       },
     };
+
+    // ── Duplicate queue protection ──
+    const existingQueue = getLocalQueue();
+    const alreadyQueued = existingQueue.some(
+      q => q.lotNo === notFoundTag && q.siteCode === _siteCode && q._meta?.status === "pending"
+    );
+    if (alreadyQueued) {
+      showNotif(`⚠ Tag ${notFoundTag} is already queued — skipping duplicate`, "warning");
+      setIsCreating(false);
+      return;
+    }
 
     // Queue locally first
     const queueEntry = {
@@ -927,79 +919,26 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
     const queue = getLocalQueue();
     queue.push(queueEntry);
     saveLocalQueue(queue);
+    setPendingCount(prev => prev + 1);
 
-    // Attempt API submission
-    try {
-      const result = await callAPI("createInventory", {
-        requests: [createPayload],
-      });
-
-      if (result && !result.error) {
-        // Mark as submitted in queue
-        queue[queue.length - 1]._meta.status = "submitted";
-        saveLocalQueue(queue);
-
-        // Add to scanned bags for session tracking
-        const bagEntry = {
-          lot_number: notFoundTag,
-          prod_code: "bio_char",
-          quantity_on_hand: weightKg,
-          location: newBagLocation,
-          production_date: productionDate,
-          scannedTag: notFoundTag,
-          quality: newBagQuality,
-          reweighKg: null,
-          discrepancy: newBagNotes || "NEW — Created via audit app",
-          status: "created",
-          confirmedAt: new Date().toISOString(),
-          approvedBy: null,
-          isNew: true,
-        };
-        setScannedBags(prev => [...prev, bagEntry]);
-        showNotif(`✓ Inventory created for tag ${notFoundTag}`, "success");
-      } else {
-        // API failed but queued locally
-        showNotif(`⚠ Queued locally — API submission failed. Will retry later.`, "warning");
-
-        // Still add to session for tracking
-        const bagEntry = {
-          lot_number: notFoundTag,
-          prod_code: "bio_char",
-          quantity_on_hand: weightKg,
-          location: newBagLocation,
-          production_date: productionDate,
-          scannedTag: notFoundTag,
-          quality: newBagQuality,
-          reweighKg: null,
-          discrepancy: newBagNotes || "NEW — Queued locally (API pending)",
-          status: "queued",
-          confirmedAt: new Date().toISOString(),
-          approvedBy: null,
-          isNew: true,
-        };
-        setScannedBags(prev => [...prev, bagEntry]);
-      }
-    } catch (err) {
-      console.error("[CreateInventory] Error:", err);
-      showNotif(`⚠ Queued locally — will retry when online.`, "warning");
-
-      const bagEntry = {
-        lot_number: notFoundTag,
-        prod_code: "bio_char",
-        quantity_on_hand: weightKg,
-        location: newBagLocation,
-        production_date: productionDate,
-        scannedTag: notFoundTag,
-        quality: newBagQuality,
-        reweighKg: null,
-        discrepancy: newBagNotes || "NEW — Queued locally (offline)",
-        status: "queued",
-        confirmedAt: new Date().toISOString(),
-        approvedBy: null,
-        isNew: true,
-      };
-      setScannedBags(prev => [...prev, bagEntry]);
-    }
+    // Add to session for tracking (queued status — will be created on batch submit)
+    const bagEntry = {
+      lot_number: notFoundTag,
+      prod_code: "bio_char",
+      quantity_on_hand: weightKg,
+      location: newBagLocation,
+      production_date: productionDate,
+      scannedTag: notFoundTag,
+      quality: newBagQuality,
+      reweighKg: null,
+      discrepancy: newBagNotes || "NEW — Queued for batch submit",
+      status: "queued",
+      confirmedAt: new Date().toISOString(),
+      approvedBy: null,
+      isNew: true,
+    };
+    setScannedBags(prev => [...prev, bagEntry]);
+    showNotif(`✓ Tag ${notFoundTag} added to queue — use SUBMIT ALL when ready`, "success");
 
     setIsCreating(false);
 
@@ -2025,11 +1964,12 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
               background: C.bgCard, border: `1px solid ${C.border}`, borderRadius: 12, padding: 20,
             }}>
               <div style={{ fontSize: 11, color: C.textMuted, letterSpacing: 2, marginBottom: 12 }}>SESSION SUMMARY</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
                 {[
                   { n: scannedBags.length, label: "BAGS", color: C.accent },
                   { n: scannedBags.filter(b => b.status === "reported").length, label: "REPORTED", color: C.pass },
                   { n: scannedBags.filter(b => b.status === "altered").length, label: "ALTERED", color: C.warning },
+                  { n: getLocalQueue().filter(q => q._meta?.status === "pending").length, label: "QUEUED", color: "#f59e0b" },
                 ].map((s, i) => (
                   <div key={i} style={{ textAlign: "center" }}>
                     <div className="stats-number" style={{ fontSize: 28, fontWeight: 900, color: s.color, fontFamily: "'JetBrains Mono',monospace" }}>{s.n}</div>
@@ -2037,6 +1977,48 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
                   </div>
                 ))}
               </div>
+
+              {/* Queue management buttons */}
+              {getLocalQueue().filter(q => q._meta?.status === "pending").length > 0 && (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 14 }}>
+                  <button onClick={async () => {
+                    const queue = getLocalQueue().filter(q => q._meta?.status === "pending");
+                    if (queue.length === 0) { showNotif("No pending items to submit", "info"); return; }
+                    const batchPayload = queue.map(({ _meta, ...rest }) => rest);
+                    try {
+                      const result = await callAPI("createInventory", { requests: batchPayload });
+                      if (result && !result.error) {
+                        // Mark all as submitted
+                        const fullQueue = getLocalQueue();
+                        const updated = fullQueue.map(q =>
+                          q._meta?.status === "pending" ? { ...q, _meta: { ...q._meta, status: "submitted" } } : q
+                        );
+                        saveLocalQueue(updated);
+                        setPendingCount(0);
+                        showNotif(`✓ Batch submitted ${queue.length} item${queue.length > 1 ? "s" : ""} to Manufacturo`, "success");
+                      } else {
+                        showNotif(`✗ Batch submit failed: ${result?.error || "Unknown error"}`, "error");
+                      }
+                    } catch (err) {
+                      showNotif(`✗ Batch submit error: ${err.message}`, "error");
+                    }
+                  }} style={{
+                    padding: "12px", background: C.accent, border: "none", borderRadius: 10,
+                    color: "#000", fontSize: 13, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", letterSpacing: 1,
+                  }}>▶ SUBMIT ALL</button>
+                  <button onClick={() => {
+                    if (window.confirm(`Clear ${getLocalQueue().filter(q => q._meta?.status === "pending").length} pending item(s) from queue? This cannot be undone.`)) {
+                      const kept = getLocalQueue().filter(q => q._meta?.status !== "pending");
+                      saveLocalQueue(kept);
+                      setPendingCount(0);
+                      showNotif("Queue cleared", "info");
+                    }
+                  }} style={{
+                    padding: "12px", background: C.bgSection, border: `1px solid ${C.border}`, borderRadius: 10,
+                    color: C.danger || "#ef4444", fontSize: 13, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", letterSpacing: 1,
+                  }}>🗑 CLEAR QUEUE</button>
+                </div>
+              )}
               <button onClick={() => onPrintReport(scannedBags)} style={{
                 width: "100%", padding: "14px", marginTop: 16, background: C.bgSection,
                 border: `1px solid ${C.border}`, borderRadius: 10, color: C.accent,
