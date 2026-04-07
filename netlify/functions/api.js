@@ -26,7 +26,11 @@ async function callRetoolWorkflow(action, payload) {
 // ============================================================
 async function callManufacturo(path, payload) {
   // Use test key for CHARM_TEST, production key for CHARM
-  const apiKey = payload?.siteCode === "CHARM_TEST"
+  // siteCode can be at top level (adjust) or nested in requests[0] (create)
+  const siteCode = payload?.siteCode
+    || payload?.requests?.[0]?.siteCode
+    || "CHARM";
+  const apiKey = siteCode === "CHARM_TEST"
     ? process.env.MANUFACTUROTEST_API_KEY
     : MANUFACTURO_API_KEY;
 
