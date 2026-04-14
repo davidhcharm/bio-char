@@ -221,7 +221,7 @@ function PPBadge({ productionDate, size = "normal" }) {
       <span style={{
         fontSize: isSmall ? 10 : 12, fontWeight: 700, color: pp.hex,
         letterSpacing: 1, fontFamily: "'JetBrains Mono',monospace",
-      }}>{pp.name}</span>
+      }}>{pp.id} — {pp.name}</span>
     </div>
   );
 }
@@ -320,7 +320,7 @@ function ReviewModal({ bagData, isDuplicate, users, onConfirm, onCancel }) {
   const items = [
     { label: "Security Tag", value: bagData.scannedTag },
     { label: "Lot Number", value: bagData.lot_number },
-    pp ? { label: "Production Period", value: pp.name, ppColor: pp.hex } : null,
+    pp ? { label: "Production Period", value: `${pp.id} — ${pp.name}`, ppColor: pp.hex } : null,
     { label: "Weight (kg)", value: bagData.quantity_on_hand.toFixed(1), warn: bagData.quantity_on_hand > 180 },
     bagData.reweighKg ? { label: "Re-weigh (kg)", value: bagData.reweighKg } : null,
     { label: "Quality", value: bagData.quality },
@@ -493,6 +493,12 @@ function AuditScreen({ onPrintReport, users, testMode, onToggleEnvPanel }) {
   const [moistureReadings, setMoistureReadings] = useState(["", "", ""]); // 3-5 readings
   const [fillLevel, setFillLevel] = useState("80");
   const [conversionMethod, setConversionMethod] = useState("moisture"); // "moisture" or "volumetric"
+  const [unitsLocked, setUnitsLocked] = useState(false); // Lock entry when suspected wrong units
+  const [unitsConfirmed, setUnitsConfirmed] = useState(false); // Operator confirmed units are correct
+  const [showPinOverride, setShowPinOverride] = useState(false); // Show pin entry for authorized override
+  const [pinValue, setPinValue] = useState("");
+  const [ppSearchTerm, setPpSearchTerm] = useState(""); // Ops ID search term
+  const [showPpDropdown, setShowPpDropdown] = useState(false); // Show PP dropdown
   const isOnline = useOnlineStatus();
   const inputRef = useRef(null);
 
@@ -616,26 +622,21 @@ function AuditScreen({ onPrintReport, users, testMode, onToggleEnvPanel }) {
 
     const match = matches[0];
 
-    // For bags with production dates Oct 2025+, weights >180 are assumed to be in lbs (wrong units).
-    // Auto-convert to kg and flag for re-weigh confirmation.
+    // For bags with production dates Oct 2025+, weights >180 are suspected wrong units (lbs instead of kg).
+    // Show a big warning requiring operator confirmation instead of auto-converting.
     const OCT_2025 = new Date("2025-10-01").getTime();
     const prodDate = match.production_date ? new Date(match.production_date).getTime() : 0;
     const isRecentBag = prodDate >= OCT_2025;
     let quantity = match.quantity_on_hand;
-    let autoConverted = false;
-
-    if (quantity > 180 && isRecentBag) {
-      // Auto-convert from lbs to kg
-      quantity = Math.round(quantity * 0.453592 * 10) / 10;
-      autoConverted = true;
-    }
+    const suspectedWrongUnits = quantity > 180 && isRecentBag;
 
    setCurrentMatch({
   lot_number: match.lot_number,
   prod_code: match.product_code,
   quantity_on_hand: quantity,
   quantity_original: match.quantity_on_hand,
-  auto_converted: autoConverted,
+  auto_converted: false,
+  suspected_wrong_units: suspectedWrongUnits,
   location: match.location || "Unknown",
   location_code: match.location_code || null,
   itag_code: match.itag_code || null,
@@ -645,9 +646,10 @@ function AuditScreen({ onPrintReport, users, testMode, onToggleEnvPanel }) {
   timestamp: new Date().toISOString(),
 });
 
-    // Weight threshold check — require re-weigh if auto-converted OR if still >180 (pre-Oct 2025 bags)
-    if (autoConverted) {
+    // Weight threshold check — require re-weigh if suspected wrong units OR if >180 (any bag)
+    if (suspectedWrongUnits) {
       setWeightWarning(true);
+      setUnitsLocked(true); // Lock entry until units confirmed or pin override
     } else if (match.quantity_on_hand > 180) {
       setWeightWarning(true);
     }
@@ -657,12 +659,20 @@ function AuditScreen({ onPrintReport, users, testMode, onToggleEnvPanel }) {
     setReweighValue("");
     setCharTypeOverride(null);
     setShowDryConversion(false);
+    setUnitsLocked(false);
+    setUnitsConfirmed(false);
+    setShowPinOverride(false);
+    setPinValue("");
   };
 
   // Opens the review modal instead of immediately confirming
   const handleRequestSubmit = () => {
-    if (!currentMatch || !selectedQuality) {
-      showNotif("Please select Char Quality before submitting", "warning");
+    if (!currentMatch) {
+      showNotif("No bag scanned", "warning");
+      return;
+    }
+    if (unitsLocked && !unitsConfirmed) {
+      showNotif("⚠ Units must be confirmed or authorized before submitting", "warning");
       return;
     }
     if (weightWarning && !reweighValue) {
@@ -693,13 +703,14 @@ function AuditScreen({ onPrintReport, users, testMode, onToggleEnvPanel }) {
 
     const bagEntry = {
       ...currentMatch,
-      quality: selectedQuality,
+      quality: selectedQuality || currentMatch.char_type || "—",
       char_type: charTypeOverride || currentMatch.char_type || null,
       char_type_original: currentMatch.char_type || null,
       dry_weight: dryWeight,
       moisture_readings: validReadings.length > 0 ? validReadings : null,
       moisture_content: avgMC,
       conversion_method: showDryConversion ? conversionMethod : null,
+      units_confirmed: unitsConfirmed || false,
       reweighKg: parsedReweigh,
       discrepancy: discrepancyNote || (weightChanged ? `Weight changed: ${currentMatch.quantity_on_hand.toFixed(1)} → ${parsedReweigh.toFixed(1)} kg` : null),
       status: isAltered ? "altered" : "reported",
@@ -710,7 +721,7 @@ function AuditScreen({ onPrintReport, users, testMode, onToggleEnvPanel }) {
     setScannedBags(prev => [...prev, bagEntry]);
     setShowSubmitGlow(true);
     setTimeout(() => setShowSubmitGlow(false), 2000);
-    showNotif(`✓ Bag ${bagEntry.lot_number} confirmed — ${bagEntry.quality}`, "success");
+    showNotif(`✓ Bag ${bagEntry.lot_number} confirmed`, "success");
 
 if (parsedReweigh !== null && weightChanged && currentMatch.lot_number) {
   const originalQty = currentMatch.quantity_on_hand;
@@ -791,10 +802,11 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
 }
 }
     // Show location routing pop-up
-    const routing = LOCATION_ROUTING[selectedQuality] || LOCATION_ROUTING["Unknown"];
+    const effectiveQuality = selectedQuality || currentMatch.char_type || "Unknown";
+    const routing = LOCATION_ROUTING[effectiveQuality] || LOCATION_ROUTING["Unknown"];
     setLocationRouting({
       lot: bagEntry.lot_number,
-      quality: selectedQuality,
+      quality: effectiveQuality,
       ...routing,
     });
 
@@ -807,6 +819,10 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
     setReweighValue("");
     setDiscrepancyNote("");
     setDuplicateWarning(false);
+    setUnitsLocked(false);
+    setUnitsConfirmed(false);
+    setShowPinOverride(false);
+    setPinValue("");
     setInventoryDuplicate(false);
     setShowReviewModal(false);
   };
@@ -838,7 +854,7 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
     setConversionMethod("moisture");
   };
 
-  const formFilled = currentMatch && selectedQuality && (!weightWarning || reweighValue);
+  const formFilled = currentMatch && (!weightWarning || reweighValue) && (!unitsLocked || unitsConfirmed);
 
   // Build bag data for review modal
   const buildBagData = () => {
@@ -848,7 +864,7 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
     const isAltered = !!(discrepancyNote || weightChanged);
     return {
       ...currentMatch,
-      quality: selectedQuality,
+      quality: selectedQuality || currentMatch.char_type || "—",
       reweighKg: parsedReweigh,
       discrepancy: discrepancyNote || (weightChanged ? `Weight changed: ${currentMatch.quantity_on_hand.toFixed(1)} → ${parsedReweigh.toFixed(1)} kg` : null),
       status: isAltered ? "altered" : "reported",
@@ -1149,34 +1165,100 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
               )}
             </div>
 
-            {/* Production Period */}
-            <div style={{ marginBottom: 16 }}>
+            {/* Production Period (searchable by Ops ID) */}
+            <div style={{ marginBottom: 16, position: "relative" }}>
               <label style={{ fontSize: 11, color: C.textMuted, letterSpacing: 2, display: "block", marginBottom: 6 }}>
-                PRODUCTION PERIOD *
+                OPS ID / PRODUCTION PERIOD *
               </label>
-              <select
-                value={newBagPP}
-                onChange={e => setNewBagPP(e.target.value)}
+              <input
+                type="text"
+                value={newBagPP ? (() => {
+                  const pp = PRODUCTION_PERIODS.find(p => String(p.id) === String(newBagPP));
+                  return pp ? `${pp.id} — ${pp.name}` : newBagPP;
+                })() : ppSearchTerm || ""}
+                onChange={e => {
+                  const val = e.target.value;
+                  setPpSearchTerm(val);
+                  setNewBagPP(""); // Clear selection while typing
+                  setShowPpDropdown(true);
+                  // Auto-select if exact Ops ID match
+                  const exactMatch = PRODUCTION_PERIODS.find(p => String(p.id) === val.trim());
+                  if (exactMatch) {
+                    setNewBagPP(String(exactMatch.id));
+                    setShowPpDropdown(false);
+                    setPpSearchTerm("");
+                  }
+                }}
+                onFocus={() => setShowPpDropdown(true)}
+                placeholder="Enter Ops ID (e.g. 2604)..."
                 style={{
                   width: "100%", padding: "12px 14px", background: C.bgInput,
-                  border: `1px solid ${C.border}`, borderRadius: 8, color: C.text,
-                  fontSize: 14, fontFamily: "inherit", outline: "none",
-                  appearance: "none", cursor: "pointer", boxSizing: "border-box",
+                  border: `1px solid ${newBagPP ? C.accent : C.border}`, borderRadius: 8, color: C.text,
+                  fontSize: 14, fontFamily: "'JetBrains Mono',monospace", outline: "none",
+                  boxSizing: "border-box",
                 }}
-              >
-                <option value="">Select production period...</option>
-                {PRODUCTION_PERIODS.slice().reverse().map(pp => {
-                  const colors = PP_COLORS[pp.color];
-                  return (
-                    <option key={pp.id} value={pp.id}>
-                      {pp.name} ({pp.start} → {pp.end})
-                    </option>
-                  );
-                })}
-              </select>
+              />
+              {/* Dropdown results */}
+              {showPpDropdown && !newBagPP && (
+                <div style={{
+                  position: "absolute", top: "100%", left: 0, right: 0, zIndex: 50,
+                  background: C.bgCard, border: `1px solid ${C.border}`, borderRadius: 8,
+                  maxHeight: 220, overflowY: "auto", marginTop: 4,
+                  boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+                }}>
+                  {(() => {
+                    const term = (ppSearchTerm || "").toLowerCase().trim();
+                    const filtered = PRODUCTION_PERIODS.slice().reverse().filter(pp =>
+                      !term ||
+                      String(pp.id).includes(term) ||
+                      pp.name.toLowerCase().includes(term) ||
+                      pp.color.toLowerCase().includes(term)
+                    );
+                    if (filtered.length === 0) return (
+                      <div style={{ padding: "12px 14px", color: C.textDim, fontSize: 13 }}>No matching Ops ID</div>
+                    );
+                    return filtered.slice(0, 12).map(pp => {
+                      const colors = PP_COLORS[pp.color];
+                      return (
+                        <div key={pp.id} onClick={() => {
+                          setNewBagPP(String(pp.id));
+                          setShowPpDropdown(false);
+                          setPpSearchTerm("");
+                        }} style={{
+                          padding: "10px 14px", cursor: "pointer",
+                          display: "flex", justifyContent: "space-between", alignItems: "center",
+                          borderBottom: `1px solid ${C.border}`,
+                          transition: "background 0.1s",
+                        }}
+                          onMouseEnter={e => e.currentTarget.style.background = C.bgSection}
+                          onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                        >
+                          <div>
+                            <span style={{
+                              fontFamily: "'JetBrains Mono',monospace", fontWeight: 700,
+                              fontSize: 14, color: C.text, marginRight: 10,
+                            }}>{pp.id}</span>
+                            <span style={{ fontSize: 13, color: C.textMuted }}>{pp.name}</span>
+                          </div>
+                          <div style={{
+                            width: 14, height: 14, borderRadius: "50%",
+                            background: colors?.bg || C.textDim,
+                            border: `2px solid ${colors?.text || C.textMuted}`,
+                            flexShrink: 0,
+                          }} />
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              )}
               {newBagPP && (
-                <div style={{ marginTop: 8 }}>
+                <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
                   <PPBadge productionDate={PRODUCTION_PERIODS.find(p => String(p.id) === String(newBagPP))?.start} />
+                  <button onClick={() => { setNewBagPP(""); setPpSearchTerm(""); }} style={{
+                    padding: "2px 8px", background: "transparent", border: `1px solid ${C.border}`,
+                    borderRadius: 4, color: C.textDim, fontSize: 10, fontFamily: "inherit", cursor: "pointer",
+                  }}>✕ Clear</button>
                 </div>
               )}
             </div>
@@ -1476,8 +1558,8 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
                 </div>
               )}
 
-              {/* Char Type (Wet/Dry) */}
-              <div style={{
+              {/* Char Type (Wet/Dry) — HIDDEN for now (tied to moisture conversion, preserved for future iteration) */}
+              {false && (<div style={{
                 background: C.bgSection, border: `1px solid ${C.border}`,
                 borderRadius: 8, padding: "10px 16px", marginBottom: 16,
               }}>
@@ -1499,19 +1581,15 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
                     {["dry", "wet"].map(ct => (
                       <button key={ct} onClick={() => {
                         setCharTypeOverride(ct);
-                        // Only add note once per change, remove opposite note if present
                         if (ct !== (currentMatch.char_type || "")) {
                           setDiscrepancyNote(prev => {
                             const wetNote = "Changed to Wet Char";
                             const dryNote = "Changed to Dry Char";
                             const newNote = ct === "wet" ? wetNote : dryNote;
-                            const removeNote = ct === "wet" ? dryNote : wetNote;
-                            // Remove any existing char type change notes
                             let cleaned = (prev || "").split("; ").filter(n => n !== wetNote && n !== dryNote).join("; ");
                             return cleaned ? cleaned + "; " + newNote : newNote;
                           });
                         } else {
-                          // Reverted to original — remove change notes
                           setDiscrepancyNote(prev => {
                             return (prev || "").split("; ").filter(n => n !== "Changed to Wet Char" && n !== "Changed to Dry Char").join("; ");
                           });
@@ -1537,10 +1615,10 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
                     ))}
                   </div>
                 </div>
-              </div>
+              </div>)}
 
-              {/* Dry Weight Conversion (shows when char is wet) */}
-              {((charTypeOverride || currentMatch.char_type) === "wet" || showDryConversion) && (
+              {/* Dry Weight Conversion — HIDDEN for now (moisture/volumetric calc preserved for future iteration) */}
+              {false && ((charTypeOverride || currentMatch.char_type) === "wet" || showDryConversion) && (
                 <div style={{
                   background: C.infoGlow, border: `1px solid ${C.info}`,
                   borderRadius: 8, padding: 16, marginBottom: 16,
@@ -1727,26 +1805,115 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
                 </div>
                 <div className="weight-large" style={{
                   fontSize: 36, fontWeight: 900, fontFamily: "'JetBrains Mono',monospace",
-                  color: weightWarning ? C.warning : C.pass,
+                  color: currentMatch.suspected_wrong_units && !unitsConfirmed ? "#ef4444" : weightWarning ? C.warning : C.pass,
                 }}>
                   {currentMatch.quantity_on_hand.toFixed(1)}
-                  {currentMatch.auto_converted && (
-                    <span style={{ fontSize: 14, fontWeight: 600, marginLeft: 8 }}>kg</span>
-                  )}
+                  <span style={{ fontSize: 14, fontWeight: 600, marginLeft: 8 }}>
+                    {currentMatch.suspected_wrong_units && !unitsConfirmed ? "⚠ lbs?" : "kg"}
+                  </span>
                 </div>
-                {currentMatch.auto_converted && (
+
+                {/* BIG UNIT WARNING — suspected wrong units (Oct 2025+ bags > 180) */}
+                {currentMatch.suspected_wrong_units && !unitsConfirmed && (
                   <div style={{
-                    fontSize: 12, color: C.warning, fontWeight: 600, marginTop: 8,
-                    padding: "8px 12px", background: C.warningGlow, borderRadius: 6,
+                    marginTop: 12, padding: 20, borderRadius: 10,
+                    background: "linear-gradient(135deg, rgba(239,68,68,0.15), rgba(239,68,68,0.05))",
+                    border: "2px solid #ef4444",
+                    textAlign: "center",
                   }}>
-                    ⚠ Auto-converted from {currentMatch.quantity_original} lbs → {currentMatch.quantity_on_hand.toFixed(1)} kg
-                    <br />
-                    <span style={{ fontSize: 11, fontWeight: 400, color: C.textMuted }}>
-                      Original weight exceeded 180 (Oct 2025+ production). Please re-weigh to confirm.
-                    </span>
+                    <div style={{
+                      fontSize: 20, fontWeight: 900, color: "#ef4444", marginBottom: 8,
+                      letterSpacing: 1, textTransform: "uppercase",
+                    }}>
+                      ⚠ CHECK UNITS ⚠
+                    </div>
+                    <div style={{ fontSize: 14, color: C.text, marginBottom: 4, fontWeight: 600 }}>
+                      This weight ({currentMatch.quantity_on_hand.toFixed(1)}) exceeds 180 for a post-Oct 2025 bag.
+                    </div>
+                    <div style={{ fontSize: 13, color: C.textMuted, marginBottom: 16 }}>
+                      Are these units correct? If the weight was entered in <strong style={{ color: "#ef4444" }}>lbs</strong> instead of <strong style={{ color: C.accent }}>kg</strong>, the entry must be corrected.
+                    </div>
+
+                    <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
+                      <button onClick={() => {
+                        setUnitsConfirmed(true);
+                        setUnitsLocked(false);
+                        showNotif("✓ Units confirmed as correct", "success");
+                      }} style={{
+                        padding: "12px 24px", borderRadius: 8, fontSize: 14, fontWeight: 700,
+                        fontFamily: "inherit", cursor: "pointer", letterSpacing: 1,
+                        background: C.accent, color: "#000", border: "none",
+                      }}>✓ YES — UNITS ARE CORRECT (KG)</button>
+
+                      <button onClick={() => {
+                        setShowPinOverride(true);
+                      }} style={{
+                        padding: "12px 24px", borderRadius: 8, fontSize: 14, fontWeight: 700,
+                        fontFamily: "inherit", cursor: "pointer", letterSpacing: 1,
+                        background: "transparent", color: "#ef4444", border: "2px solid #ef4444",
+                      }}>✗ WRONG — NEEDS CORRECTION</button>
+                    </div>
+
+                    {/* PIN Override for authorized correction */}
+                    {showPinOverride && (
+                      <div style={{
+                        marginTop: 16, padding: 16, background: C.bgSection, borderRadius: 8,
+                        border: `1px solid ${C.border}`,
+                      }}>
+                        <div style={{ fontSize: 11, color: C.warning, letterSpacing: 2, fontWeight: 700, marginBottom: 10 }}>
+                          AUTHORIZED CORRECTION — ENTER PIN
+                        </div>
+                        <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+                          <input
+                            type="password"
+                            value={pinValue}
+                            onChange={e => setPinValue(e.target.value)}
+                            placeholder="Enter PIN..."
+                            maxLength={6}
+                            style={{
+                              width: 160, padding: "10px 14px", background: C.bgInput,
+                              border: `1px solid ${C.warning}`, borderRadius: 8, color: C.text,
+                              fontSize: 18, fontFamily: "'JetBrains Mono',monospace", outline: "none",
+                              textAlign: "center", letterSpacing: 6,
+                            }}
+                            onKeyDown={e => { if (e.key === "Enter") document.getElementById("pin-submit-btn")?.click(); }}
+                          />
+                          <button id="pin-submit-btn" onClick={() => {
+                            // PIN validation — check against authorized PINs
+                            const AUTHORIZED_PINS = ["1234", "5678", "0000"]; // TODO: move to env/config
+                            if (AUTHORIZED_PINS.includes(pinValue)) {
+                              setUnitsConfirmed(true);
+                              setUnitsLocked(false);
+                              setWeightWarning(true); // Force re-weigh with corrected value
+                              setShowPinOverride(false);
+                              setPinValue("");
+                              showNotif("🔓 Authorized — enter corrected weight below", "success");
+                            } else {
+                              showNotif("✗ Invalid PIN — contact a supervisor", "error");
+                              setPinValue("");
+                            }
+                          }} style={{
+                            padding: "10px 20px", borderRadius: 8, fontSize: 14, fontWeight: 700,
+                            fontFamily: "inherit", cursor: "pointer",
+                            background: C.warning, color: "#000", border: "none",
+                          }}>UNLOCK</button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
-                {weightWarning && !currentMatch.auto_converted && (
+
+                {/* Units confirmed badge */}
+                {currentMatch.suspected_wrong_units && unitsConfirmed && (
+                  <div style={{
+                    fontSize: 12, color: C.pass, fontWeight: 600, marginTop: 8,
+                    padding: "8px 12px", background: `${C.pass}15`, borderRadius: 6,
+                  }}>
+                    ✓ Units confirmed as correct by operator
+                  </div>
+                )}
+
+                {weightWarning && !currentMatch.suspected_wrong_units && (
                   <div style={{ fontSize: 12, color: C.warning, fontWeight: 600, marginTop: 8 }}>
                     ⚠ Weight exceeds 180 kg — Re-weigh required to confirm units are in kg
                   </div>
@@ -1792,68 +1959,7 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
                 </div>
               )}
 
-              {/* Char Quality */}
-              <div style={{ marginBottom: 16 }}>
-                <label style={{ fontSize: 11, color: C.textMuted, letterSpacing: 2, display: "block", marginBottom: 8 }}>
-                  CHAR QUALITY
-                </label>
-                <div className="quality-buttons" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {QUALITY_OPTIONS.map(q => (
-                    <button key={q} onClick={() => setSelectedQuality(q)} style={{
-                      padding: "10px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600,
-                      fontFamily: "inherit", cursor: "pointer", letterSpacing: 0.5,
-                      background: selectedQuality === q ? C.accent : C.bgSection,
-                      color: selectedQuality === q ? C.bg : C.textMuted,
-                      border: `1px solid ${selectedQuality === q ? C.accent : C.border}`,
-                      transition: "all 0.2s",
-                    }}>{q}</button>
-                  ))}
-                </div>
-                {/* Quality Reference Photos */}
-                {selectedQuality && (
-                  <div style={{
-                    marginTop: 12, borderRadius: 8, overflow: "hidden",
-                    border: `1px solid ${C.border}`, background: C.bgSection,
-                  }}>
-                    <div style={{ fontSize: 10, color: C.textDim, letterSpacing: 2, padding: "8px 12px", textTransform: "uppercase" }}>
-                      {selectedQuality === "Unknown" ? "REFERENCE — COMPARE BOTH" : `REFERENCE — ${selectedQuality.toUpperCase()}`}
-                    </div>
-                    <div style={{
-                      display: "flex", gap: 1,
-                      justifyContent: selectedQuality === "Unknown" ? "center" : "center",
-                    }}>
-                      {(selectedQuality === "Fully Pyrolyzed Char" || selectedQuality === "Unknown") && (
-                        <div style={{ flex: selectedQuality === "Unknown" ? 1 : undefined, textAlign: "center" }}>
-                          <img src={CHAR_PHOTO_PYROLYZED} alt="Fully Pyrolyzed" style={{
-                            width: selectedQuality === "Unknown" ? "100%" : 200,
-                            maxHeight: selectedQuality === "Unknown" ? 160 : 200,
-                            objectFit: "cover", display: "block",
-                          }} />
-                          {selectedQuality === "Unknown" && (
-                            <div style={{ fontSize: 10, color: C.pass, fontWeight: 700, padding: "6px 0", letterSpacing: 1 }}>
-                              FULLY PYROLYZED
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      {(selectedQuality === "Cookie Dough Char" || selectedQuality === "Unknown") && (
-                        <div style={{ flex: selectedQuality === "Unknown" ? 1 : undefined, textAlign: "center" }}>
-                          <img src={CHAR_PHOTO_COOKIE} alt="Cookie Dough" style={{
-                            width: selectedQuality === "Unknown" ? "100%" : 200,
-                            maxHeight: selectedQuality === "Unknown" ? 160 : 200,
-                            objectFit: "cover", display: "block",
-                          }} />
-                          {selectedQuality === "Unknown" && (
-                            <div style={{ fontSize: 10, color: C.warning, fontWeight: 700, padding: "6px 0", letterSpacing: 1 }}>
-                              COOKIE DOUGH
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
+              {/* Char Quality — removed: operator trusts original reporting */}
 
               {/* Location (locked) */}
               <div style={{ marginBottom: 16 }}>
