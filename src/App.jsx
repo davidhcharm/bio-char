@@ -126,17 +126,36 @@ const PRODUCTION_PERIODS = [
   { id: 2612, name: "December 2026 PP",   color: "Red",    start: "2026-12-01", end: "2026-12-31" },
 ];
 
-// Storage locations for bio_char at Bighorn (from Manufacturo)
+// Storage locations for bio_char — disposition-based
 const STORAGE_LOCATIONS = [
-  { code: "biochar_dry", label: "Biochar Dry" },
-  { code: "char_dry", label: "Char Dry" },
+  { code: "AG", label: "AG", icon: "🌿", color: "#22c55e" },
+  { code: "Non-AG", label: "Non-AG (Cement Trial)", icon: "🏗", color: "#f97316" },
+  { code: "Pending", label: "Pending", icon: "⏳", color: "#eab308" },
+  { code: "Scrap", label: "Scrap", icon: "🗑", color: "#ef4444" },
 ];
 
-// Location routing rules based on char quality (placeholders — update with actual names)
+// Cement trial production periods (failing PPs routed to cement)
+const CEMENT_TRIAL_PPS = [2502, 2511, 2512, 2601, 2602, 2603];
+
+// Auto-determine disposition based on production period
+// Non-AG = cement trial PPs, AG = everything else (unless overridden by Pending/Scrap checkbox)
+function getAutoDisposition(productionDateStr) {
+  const pp = getProductionPeriod(productionDateStr);
+  const agInfo = STORAGE_LOCATIONS.find(l => l.code === "AG");
+  const nonAgInfo = STORAGE_LOCATIONS.find(l => l.code === "Non-AG");
+  if (!pp) return { disposition: "AG", color: agInfo.color, icon: agInfo.icon };
+  if (CEMENT_TRIAL_PPS.includes(pp.id)) {
+    return { disposition: "Non-AG (Cement Trial)", color: nonAgInfo.color, icon: nonAgInfo.icon };
+  }
+  return { disposition: "AG", color: agInfo.color, icon: agInfo.icon };
+}
+
+// Location routing rules — now disposition-based
 const LOCATION_ROUTING = {
-  "Fully Pyrolyzed Char": { location: "Location A", color: C.pass, icon: "✅" },
-  "Cookie Dough Char":    { location: "Location B", color: C.warning, icon: "🍪" },
-  "Unknown":              { location: "Location C", color: C.fail, icon: "🗑" },
+  "AG":                      { location: "AG", color: "#22c55e", icon: "🌿" },
+  "Non-AG (Cement Trial)":   { location: "Non-AG (Cement Trial)", color: "#f97316", icon: "🏗" },
+  "Pending":                 { location: "Pending", color: "#eab308", icon: "⏳" },
+  "Scrap":                   { location: "Scrap", color: "#ef4444", icon: "🗑" },
 };
 
 // Dry weight conversion constants
@@ -499,6 +518,8 @@ function AuditScreen({ onPrintReport, users, testMode, onToggleEnvPanel }) {
   const [pinValue, setPinValue] = useState("");
   const [ppSearchTerm, setPpSearchTerm] = useState(""); // Ops ID search term
   const [showPpDropdown, setShowPpDropdown] = useState(false); // Show PP dropdown
+  const [statusOverride, setStatusOverride] = useState(null); // "pending" or "scrap" — bypasses Manufacturo
+  const [showStatusWarning, setShowStatusWarning] = useState(false); // Confirm before marking as pending/scrap
   const isOnline = useOnlineStatus();
   const inputRef = useRef(null);
 
@@ -663,6 +684,8 @@ function AuditScreen({ onPrintReport, users, testMode, onToggleEnvPanel }) {
     setUnitsConfirmed(false);
     setShowPinOverride(false);
     setPinValue("");
+    setStatusOverride(null);
+    setShowStatusWarning(false);
   };
 
   // Opens the review modal instead of immediately confirming
@@ -701,6 +724,17 @@ function AuditScreen({ onPrintReport, users, testMode, onToggleEnvPanel }) {
       dryWeight = Math.round(DRY_BULK_DENSITY * SACK_VOLUME_M3 * parseFloat(fillLevel) / 100 * 10) / 10;
     }
 
+    // Determine disposition: Pending/Scrap override, or auto from PP
+    let finalStatus = isAltered ? "altered" : "reported";
+    let disposition = getAutoDisposition(currentMatch.production_date);
+    if (statusOverride === "pending") {
+      finalStatus = "pending";
+      disposition = LOCATION_ROUTING["Pending"];
+    } else if (statusOverride === "scrap") {
+      finalStatus = "scrap";
+      disposition = LOCATION_ROUTING["Scrap"];
+    }
+
     const bagEntry = {
       ...currentMatch,
       quality: selectedQuality || currentMatch.char_type || "—",
@@ -713,7 +747,8 @@ function AuditScreen({ onPrintReport, users, testMode, onToggleEnvPanel }) {
       units_confirmed: unitsConfirmed || false,
       reweighKg: parsedReweigh,
       discrepancy: discrepancyNote || (weightChanged ? `Weight changed: ${currentMatch.quantity_on_hand.toFixed(1)} → ${parsedReweigh.toFixed(1)} kg` : null),
-      status: isAltered ? "altered" : "reported",
+      status: finalStatus,
+      disposition: disposition.disposition || disposition.location || "Unknown",
       confirmedAt: new Date().toISOString(),
       approvedBy: approverId ? users.find(u => String(u.id) === String(approverId))?.display_name || null : null,
     };
@@ -723,6 +758,8 @@ function AuditScreen({ onPrintReport, users, testMode, onToggleEnvPanel }) {
     setTimeout(() => setShowSubmitGlow(false), 2000);
     showNotif(`✓ Bag ${bagEntry.lot_number} confirmed`, "success");
 
+// Only adjust Manufacturo inventory if NOT pending/scrap (those are report-only)
+if (!statusOverride) {
 if (parsedReweigh !== null && weightChanged && currentMatch.lot_number) {
   const originalQty = currentMatch.quantity_on_hand;
   const newQty = parsedReweigh;
@@ -801,12 +838,13 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
   })();
 }
 }
-    // Show location routing pop-up
-    const effectiveQuality = selectedQuality || currentMatch.char_type || "Unknown";
-    const routing = LOCATION_ROUTING[effectiveQuality] || LOCATION_ROUTING["Unknown"];
+} // end skip Manufacturo for pending/scrap
+    // Show location routing pop-up using disposition
+    const routing = LOCATION_ROUTING[bagEntry.disposition] || LOCATION_ROUTING["AG"];
     setLocationRouting({
       lot: bagEntry.lot_number,
-      quality: effectiveQuality,
+      quality: bagEntry.disposition,
+      charType: bagEntry.quality || bagEntry.char_type || "—",
       ...routing,
     });
 
@@ -823,6 +861,8 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
     setUnitsConfirmed(false);
     setShowPinOverride(false);
     setPinValue("");
+    setStatusOverride(null);
+    setShowStatusWarning(false);
     setInventoryDuplicate(false);
     setShowReviewModal(false);
   };
@@ -891,6 +931,10 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
     const selectedPP = PRODUCTION_PERIODS.find(p => String(p.id) === String(newBagPP));
     const productionDate = selectedPP ? selectedPP.start : new Date().toISOString().split("T")[0];
 
+    // Map disposition to Manufacturo locationCode
+    // AG/Non-AG/Pending/Scrap are our disposition labels — Manufacturo still needs a valid location code
+    const manufacturoLocationCode = _siteCode === "CHARM_TEST" ? "biochar_dry" : "biochar_dry"; // TODO: update prod location codes as needed
+
     const createPayload = {
       siteCode: _siteCode,
       productCode: "bio_char",
@@ -899,10 +943,11 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
       quantity: weightKg,
       status: "AVAILABLE",
       productionDate: productionDate,
-      locationCode: newBagLocation,
+      locationCode: manufacturoLocationCode,
       traceCustomAttributes: {
         values: {
           char_type: newBagQuality,
+          disposition: newBagLocation, // Store our disposition label as a custom attribute
         },
       },
     };
@@ -958,10 +1003,12 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
 
     setIsCreating(false);
 
-    // Show location routing pop-up for all paths
-    const routing = LOCATION_ROUTING[newBagQuality] || LOCATION_ROUTING["Unknown"];
+    // Show location routing pop-up using disposition
+    const savedDisposition = newBagLocation; // AG, Non-AG, Pending, or Scrap
+    const dispLabel = STORAGE_LOCATIONS.find(l => l.code === savedDisposition)?.label || savedDisposition;
+    const routing = LOCATION_ROUTING[dispLabel] || LOCATION_ROUTING["AG"];
     const savedTag = notFoundTag;
-    const savedQuality = newBagQuality;
+    const savedCharType = newBagQuality || "—";
 
     // Reset form fields but don't clear locationRouting
     setCurrentMatch(null);
@@ -985,7 +1032,8 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
 
     setLocationRouting({
       lot: savedTag,
-      quality: savedQuality,
+      quality: dispLabel,
+      charType: savedCharType,
       ...routing,
     });
   };
@@ -1017,11 +1065,11 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
             <div className="modal-title" style={{
               fontSize: 13, color: C.textMuted, letterSpacing: 2, textTransform: "uppercase",
               marginBottom: 8,
-            }}>PUT CHAR SUPER SAC INTO</div>
+            }}>BAG DISPOSITION</div>
 
             <div className="location-name" style={{
-              fontSize: 32, fontWeight: 900, color: locationRouting.color,
-              letterSpacing: 4, fontFamily: "'JetBrains Mono',monospace",
+              fontSize: 28, fontWeight: 900, color: locationRouting.color,
+              letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace",
               padding: "16px 0", marginBottom: 8,
               animation: "pulse 2s ease-in-out infinite",
             }}>{locationRouting.location}</div>
@@ -1033,7 +1081,7 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
             }}>
               <div style={{ display: "flex", gap: 20, justifyContent: "center", fontSize: 12, color: C.textMuted }}>
                 <span>Lot: <span style={{ color: C.text, fontWeight: 700, fontFamily: "'JetBrains Mono',monospace" }}>{locationRouting.lot}</span></span>
-                <span>Quality: <span style={{ color: locationRouting.color, fontWeight: 700 }}>{locationRouting.quality}</span></span>
+                <span>Quality: <span style={{ color: C.text, fontWeight: 700 }}>{locationRouting.charType || "—"}</span></span>
               </div>
             </div>
 
@@ -1187,6 +1235,8 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
                     setNewBagPP(String(exactMatch.id));
                     setShowPpDropdown(false);
                     setPpSearchTerm("");
+                    // Auto-set disposition from PP
+                    setNewBagLocation(CEMENT_TRIAL_PPS.includes(exactMatch.id) ? "Non-AG" : "AG");
                   }
                 }}
                 onFocus={() => setShowPpDropdown(true)}
@@ -1224,6 +1274,8 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
                           setNewBagPP(String(pp.id));
                           setShowPpDropdown(false);
                           setPpSearchTerm("");
+                          // Auto-set disposition from PP
+                          setNewBagLocation(CEMENT_TRIAL_PPS.includes(pp.id) ? "Non-AG" : "AG");
                         }} style={{
                           padding: "10px 14px", cursor: "pointer",
                           display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -1326,23 +1378,87 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
               )}
             </div>
 
-            {/* Storage Location */}
+            {/* Disposition — auto-determined from selected PP, with Pending/Scrap override */}
             <div style={{ marginBottom: 16 }}>
               <label style={{ fontSize: 11, color: C.textMuted, letterSpacing: 2, display: "block", marginBottom: 6 }}>
-                STORAGE LOCATION *
+                DISPOSITION
               </label>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {STORAGE_LOCATIONS.map(loc => (
-                  <button key={loc.code} onClick={() => setNewBagLocation(loc.code)} style={{
-                    padding: "10px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600,
-                    fontFamily: "inherit", cursor: "pointer", letterSpacing: 0.5,
-                    background: newBagLocation === loc.code ? C.accent : C.bgSection,
-                    color: newBagLocation === loc.code ? C.bg : C.textMuted,
-                    border: `1px solid ${newBagLocation === loc.code ? C.accent : C.border}`,
-                    transition: "all 0.2s",
-                  }}>{loc.label}</button>
-                ))}
-              </div>
+              {(() => {
+                // Auto-determine disposition from selected PP
+                const selectedPPObj = newBagPP ? PRODUCTION_PERIODS.find(p => String(p.id) === String(newBagPP)) : null;
+                const autoDisp = selectedPPObj
+                  ? (CEMENT_TRIAL_PPS.includes(selectedPPObj.id) ? "Non-AG" : "AG")
+                  : null;
+                // If Pending/Scrap override is active, show that instead
+                const effectiveDisp = (newBagLocation === "Pending" || newBagLocation === "Scrap")
+                  ? newBagLocation
+                  : (autoDisp || "—");
+                const dispInfo = STORAGE_LOCATIONS.find(l => l.code === effectiveDisp) || { icon: "❓", color: C.textDim, label: "Select a Production Period first" };
+
+                return (
+                  <>
+                    {/* Auto disposition badge */}
+                    <div style={{
+                      padding: "14px 18px",
+                      background: autoDisp
+                        ? `linear-gradient(135deg, ${dispInfo.color}25, ${dispInfo.color}10)`
+                        : C.bgSection,
+                      border: `2px solid ${autoDisp ? dispInfo.color : C.border}`,
+                      borderRadius: 10,
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                      marginBottom: 10,
+                      boxShadow: autoDisp ? `0 0 12px ${dispInfo.color}30` : "none",
+                    }}>
+                      <span style={{ fontSize: 16, fontWeight: 900, color: autoDisp ? dispInfo.color : C.textDim, letterSpacing: 1 }}>
+                        {dispInfo.icon} {effectiveDisp === "—" ? "Select PP to determine" : (STORAGE_LOCATIONS.find(l => l.code === effectiveDisp)?.label || effectiveDisp)}
+                      </span>
+                      {autoDisp && newBagLocation !== "Pending" && newBagLocation !== "Scrap" && (
+                        <span style={{ fontSize: 10, letterSpacing: 2, color: C.textDim }}>AUTO</span>
+                      )}
+                      {(newBagLocation === "Pending" || newBagLocation === "Scrap") && (
+                        <button onClick={() => setNewBagLocation(autoDisp || "AG")} style={{
+                          padding: "2px 8px", background: "transparent", border: `1px solid ${C.border}`,
+                          borderRadius: 4, color: C.textDim, fontSize: 10, fontFamily: "inherit", cursor: "pointer",
+                        }}>✕ Clear Override</button>
+                      )}
+                    </div>
+
+                    {/* Pending/Scrap override buttons */}
+                    <div style={{ display: "flex", gap: 8 }}>
+                      {[
+                        { key: "Pending", label: "⏳ Pending", color: "#f59e0b" },
+                        { key: "Scrap", label: "🗑 Scrap", color: "#ef4444" },
+                      ].map(opt => (
+                        <button key={opt.key} onClick={() => {
+                          setNewBagLocation(newBagLocation === opt.key ? (autoDisp || "AG") : opt.key);
+                        }} style={{
+                          flex: 1, padding: "8px 12px", borderRadius: 8, fontSize: 12, fontWeight: 700,
+                          fontFamily: "inherit", cursor: "pointer",
+                          background: newBagLocation === opt.key ? `${opt.color}20` : C.bgSection,
+                          color: newBagLocation === opt.key ? opt.color : C.textMuted,
+                          border: `2px solid ${newBagLocation === opt.key ? opt.color : C.border}`,
+                          transition: "all 0.2s",
+                        }}>{opt.label}</button>
+                      ))}
+                    </div>
+
+                    {/* Warning for Pending/Scrap */}
+                    {(newBagLocation === "Pending" || newBagLocation === "Scrap") && (
+                      <div style={{
+                        marginTop: 10, padding: 12, borderRadius: 8,
+                        background: newBagLocation === "Scrap" ? "rgba(239,68,68,0.1)" : "rgba(245,158,11,0.1)",
+                        border: `1px solid ${newBagLocation === "Scrap" ? "#ef4444" : "#f59e0b"}`,
+                        fontSize: 12, color: newBagLocation === "Scrap" ? "#ef4444" : "#f59e0b", fontWeight: 600,
+                        textAlign: "center",
+                      }}>
+                        {newBagLocation === "Scrap"
+                          ? "⚠ This bag will be created and marked for scrap"
+                          : "⚠ This bag will be created with pending status"}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
 
             {/* Notes */}
@@ -2028,13 +2144,125 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
                 </div>
               </div>
 
+              {/* Disposition display — auto-determined from PP */}
+              {currentMatch && (
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ fontSize: 11, color: C.textMuted, letterSpacing: 2, display: "block", marginBottom: 6 }}>DISPOSITION</label>
+                  {(() => {
+                    const disp = statusOverride === "pending" ? LOCATION_ROUTING["Pending"]
+                      : statusOverride === "scrap" ? LOCATION_ROUTING["Scrap"]
+                      : getAutoDisposition(currentMatch.production_date);
+                    const label = statusOverride === "pending" ? "Pending"
+                      : statusOverride === "scrap" ? "Scrap"
+                      : disp.disposition;
+                    return (
+                      <div style={{
+                        padding: "14px 18px",
+                        background: `linear-gradient(135deg, ${disp.color}25, ${disp.color}10)`,
+                        border: `2px solid ${disp.color}`, borderRadius: 10,
+                        display: "flex", justifyContent: "space-between", alignItems: "center",
+                        boxShadow: `0 0 12px ${disp.color}30`,
+                      }}>
+                        <span style={{ fontSize: 16, fontWeight: 900, color: disp.color, letterSpacing: 1 }}>
+                          {disp.icon} {label}
+                        </span>
+                        {!statusOverride && (
+                          <span style={{ fontSize: 10, letterSpacing: 2, color: C.textDim }}>AUTO</span>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {/* Pending / Scrap override checkboxes */}
+              {currentMatch && (
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ fontSize: 11, color: C.textMuted, letterSpacing: 2, display: "block", marginBottom: 8 }}>
+                    STATUS OVERRIDE
+                  </label>
+                  <div style={{ display: "flex", gap: 12 }}>
+                    {[
+                      { key: "pending", label: "⏳ Pending", color: "#f59e0b" },
+                      { key: "scrap", label: "🗑 Scrap", color: C.fail || "#ef4444" },
+                    ].map(opt => (
+                      <label key={opt.key} style={{
+                        display: "flex", alignItems: "center", gap: 8,
+                        padding: "10px 16px", borderRadius: 8, cursor: "pointer",
+                        background: statusOverride === opt.key ? `${opt.color}20` : C.bgSection,
+                        border: `2px solid ${statusOverride === opt.key ? opt.color : C.border}`,
+                        transition: "all 0.2s", flex: 1,
+                      }}>
+                        <input
+                          type="checkbox"
+                          checked={statusOverride === opt.key}
+                          onChange={() => {
+                            if (statusOverride === opt.key) {
+                              setStatusOverride(null);
+                              setShowStatusWarning(false);
+                            } else {
+                              setStatusOverride(opt.key);
+                              setShowStatusWarning(true);
+                            }
+                          }}
+                          style={{ width: 18, height: 18, accentColor: opt.color }}
+                        />
+                        <span style={{
+                          fontSize: 13, fontWeight: 700,
+                          color: statusOverride === opt.key ? opt.color : C.textMuted,
+                        }}>{opt.label}</span>
+                      </label>
+                    ))}
+                  </div>
+
+                  {/* Status override warning */}
+                  {showStatusWarning && statusOverride && (
+                    <div style={{
+                      marginTop: 12, padding: 16, borderRadius: 10,
+                      background: statusOverride === "scrap"
+                        ? "linear-gradient(135deg, rgba(239,68,68,0.15), rgba(239,68,68,0.05))"
+                        : "linear-gradient(135deg, rgba(245,158,11,0.15), rgba(245,158,11,0.05))",
+                      border: `2px solid ${statusOverride === "scrap" ? (C.fail || "#ef4444") : "#f59e0b"}`,
+                      textAlign: "center",
+                    }}>
+                      <div style={{
+                        fontSize: 18, fontWeight: 900, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6,
+                        color: statusOverride === "scrap" ? (C.fail || "#ef4444") : "#f59e0b",
+                      }}>
+                        {statusOverride === "scrap" ? "⚠ MARKING AS SCRAP ⚠" : "⚠ MARKING AS PENDING ⚠"}
+                      </div>
+                      <div style={{ fontSize: 13, color: C.text, marginBottom: 4, fontWeight: 600 }}>
+                        This bag will {statusOverride === "scrap" ? "be flagged for scrap disposal" : "remain in a pending state"}.
+                      </div>
+                      <div style={{ fontSize: 12, color: C.textMuted }}>
+                        No inventory adjustment will be sent to Manufacturo. This status will appear in the audit report only.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Status banners */}
               {formFilled && !inventoryDuplicate && (
                 <div style={{
-                  padding: "10px 16px", background: C.passGlow, border: `1px solid ${C.pass}`,
-                  borderRadius: 8, color: C.pass, fontSize: 13, fontWeight: 700, marginBottom: 16,
+                  padding: "10px 16px",
+                  background: statusOverride === "scrap" ? (C.failGlow || "rgba(239,68,68,0.1)")
+                    : statusOverride === "pending" ? "rgba(245,158,11,0.1)"
+                    : C.passGlow,
+                  border: `1px solid ${statusOverride === "scrap" ? (C.fail || "#ef4444")
+                    : statusOverride === "pending" ? "#f59e0b"
+                    : C.pass}`,
+                  borderRadius: 8,
+                  color: statusOverride === "scrap" ? (C.fail || "#ef4444")
+                    : statusOverride === "pending" ? "#f59e0b"
+                    : C.pass,
+                  fontSize: 13, fontWeight: 700, marginBottom: 16,
                   textAlign: "center", animation: "pulse 2s ease-in-out infinite",
-                }}>✓ BAG READY FOR SUBMISSION — {selectedQuality}</div>
+                }}>
+                  {statusOverride === "scrap" ? "🗑 BAG WILL BE MARKED AS SCRAP"
+                    : statusOverride === "pending" ? "⏳ BAG WILL BE MARKED AS PENDING"
+                    : "✓ BAG READY FOR SUBMISSION"}
+                </div>
               )}
 
               {inventoryDuplicate && formFilled && (
@@ -2070,13 +2298,15 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
               background: C.bgCard, border: `1px solid ${C.border}`, borderRadius: 12, padding: 20,
             }}>
               <div style={{ fontSize: 11, color: C.textMuted, letterSpacing: 2, marginBottom: 12 }}>SESSION SUMMARY</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
                 {[
                   { n: scannedBags.length, label: "BAGS", color: C.accent },
                   { n: scannedBags.filter(b => b.status === "reported").length, label: "REPORTED", color: C.pass },
                   { n: scannedBags.filter(b => b.status === "altered").length, label: "ALTERED", color: C.warning },
-                  { n: getLocalQueue().filter(q => q._meta?.status === "pending").length, label: "QUEUED", color: "#f59e0b" },
-                ].map((s, i) => (
+                  { n: scannedBags.filter(b => b.status === "pending").length, label: "PENDING", color: "#f59e0b" },
+                  { n: scannedBags.filter(b => b.status === "scrap").length, label: "SCRAP", color: C.fail || "#ef4444" },
+                  { n: getLocalQueue().filter(q => q._meta?.status === "pending").length, label: "QUEUED", color: "#8b5cf6" },
+                ].filter(s => s.n > 0 || ["BAGS", "REPORTED", "ALTERED"].includes(s.label)).map((s, i) => (
                   <div key={i} style={{ textAlign: "center" }}>
                     <div className="stats-number" style={{ fontSize: 28, fontWeight: 900, color: s.color, fontFamily: "'JetBrains Mono',monospace" }}>{s.n}</div>
                     <div style={{ fontSize: 10, color: C.textMuted, letterSpacing: 1 }}>{s.label}</div>
@@ -2113,9 +2343,13 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
                     color: "#000", fontSize: 13, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", letterSpacing: 1,
                   }}>▶ SUBMIT ALL</button>
                   <button onClick={() => {
-                    if (window.confirm(`Clear ${getLocalQueue().filter(q => q._meta?.status === "pending").length} pending item(s) from queue? This cannot be undone.`)) {
-                      const kept = getLocalQueue().filter(q => q._meta?.status !== "pending");
-                      saveLocalQueue(kept);
+                    const pendingCount = getLocalQueue().filter(q => q._meta?.status === "pending").length;
+                    const totalCount = getLocalQueue().length;
+                    const msg = pendingCount === totalCount
+                      ? `Clear ${pendingCount} pending item(s) from queue? This cannot be undone.`
+                      : `Clear ${pendingCount} pending and ${totalCount - pendingCount} submitted item(s) from queue? This cannot be undone.`;
+                    if (window.confirm(msg)) {
+                      saveLocalQueue([]);
                       setPendingCount(0);
                       showNotif("Queue cleared", "info");
                     }
@@ -2130,6 +2364,61 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
                 border: `1px solid ${C.border}`, borderRadius: 10, color: C.accent,
                 fontSize: 14, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", letterSpacing: 2,
               }}>🖨 GENERATE REPORT</button>
+
+              {/* CSV Export */}
+              <button onClick={() => {
+                if (scannedBags.length === 0) { showNotif("No bags to export", "info"); return; }
+
+                // Sort bags by category: audited (reported/altered), new created, scrap, pending
+                const sortOrder = { "reported": 1, "altered": 2, "created": 3, "queued": 4, "scrap": 5, "pending": 6 };
+                const sorted = [...scannedBags].sort((a, b) => (sortOrder[a.status] || 99) - (sortOrder[b.status] || 99));
+
+                // CSV header
+                const headers = [
+                  "Type", "Status", "Disposition", "Security Tag", "Lot Number", "Ops ID", "Production Period",
+                  "Weight (kg)", "Re-weigh (kg)", "Quality", "Location", "Discrepancy", "Approved By", "Scanned At"
+                ];
+
+                const rows = sorted.map(b => {
+                  const pp = getProductionPeriod(b.production_date);
+                  // Categorize by type
+                  let type = "Audited";
+                  if (b.isNew || b.status === "created" || b.status === "queued") type = "New Created";
+                  else if (b.status === "scrap") type = "Scrap";
+                  else if (b.status === "pending") type = "Pending";
+
+                  return [
+                    type,
+                    (b.status || "").toUpperCase(),
+                    b.disposition || (pp && CEMENT_TRIAL_PPS.includes(pp.id) ? "Non-AG (Cement Trial)" : "AG"),
+                    b.scannedTag || "",
+                    b.lot_number || "",
+                    pp ? pp.id : "",
+                    pp ? pp.name : "",
+                    b.quantity_on_hand != null ? b.quantity_on_hand.toFixed(1) : "",
+                    b.reweighKg != null ? b.reweighKg : "",
+                    b.quality || "",
+                    b.location || "",
+                    b.discrepancy || "",
+                    b.approvedBy || "",
+                    b.confirmedAt ? new Date(b.confirmedAt).toLocaleString() : "",
+                  ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(",");
+                });
+
+                const csv = [headers.join(","), ...rows].join("\n");
+                const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `biochar_audit_${new Date().toISOString().split("T")[0]}.csv`;
+                a.click();
+                URL.revokeObjectURL(url);
+                showNotif(`✓ Exported ${sorted.length} bags to CSV`, "success");
+              }} style={{
+                width: "100%", padding: "14px", marginTop: 8, background: C.bgSection,
+                border: `1px solid ${C.border}`, borderRadius: 10, color: C.info || "#3b82f6",
+                fontSize: 14, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", letterSpacing: 2,
+              }}>📥 EXPORT CSV</button>
             </div>
           )}
         </div>
@@ -2286,21 +2575,26 @@ function PrintReport({ bags, onBack }) {
         th, td { border: 1px solid #ccc; padding: 5px; text-align: left; }
         th { background: #f0f0f0; font-weight: 700; }
         .altered { background: #fff3cd; }
+        .scrap { background: #fee2e2; }
+        .pending { background: #fef3c7; }
         .footer { margin-top: 24px; font-size: 11px; color: #888; }
       </style></head><body>
       <h1>CHARM INDUSTRIAL — Bio-Char Inventory Audit Report</h1>
       <h2>Generated: ${reportDate} | ${dateRangeText}</h2>
       <h2>Showing: ${filteredBags.length} bags | Reported: ${reported} | Altered: ${altered}</h2>
       <table>
-        <thead><tr><th>#</th><th>Scanned</th><th>Tag</th><th>Lot</th><th>Prod. Period</th><th>Status</th><th>Weight</th><th>Re-weigh</th><th>Quality</th><th>Location</th><th>Approved By</th><th>Notes</th></tr></thead>
+        <thead><tr><th>#</th><th>Scanned</th><th>Tag</th><th>Lot</th><th>Prod. Period</th><th>Status</th><th>Disposition</th><th>Weight</th><th>Re-weigh</th><th>Quality</th><th>Location</th><th>Approved By</th><th>Notes</th></tr></thead>
         <tbody>
           ${filteredBags.map((b, i) => {
             const bPP = getProductionPeriod(b.production_date);
-            const ppCell = bPP ? `<span style="color:${bPP.hex};font-weight:700;">&#9632;</span> ${bPP.name}` : "—";
-            return `<tr class="${b.status === "altered" ? "altered" : ""}">
+            const ppCell = bPP ? `<span style="color:${bPP.hex};font-weight:700;">&#9632;</span> ${bPP.id} — ${bPP.name}` : "—";
+            const dispColor = b.status === "scrap" ? "#ef4444" : b.status === "pending" ? "#f59e0b" : "#333";
+            return `<tr class="${b.status === "altered" ? "altered" : b.status === "scrap" ? "scrap" : b.status === "pending" ? "pending" : ""}">
             <td>${i + 1}</td><td>${new Date(b.confirmedAt).toLocaleString()}</td><td>${b.scannedTag}</td><td>${b.lot_number}</td>
             <td>${ppCell}</td>
-            <td>${b.status.toUpperCase()}</td><td>${b.quantity_on_hand.toFixed(1)}</td>
+            <td>${b.status.toUpperCase()}</td>
+            <td style="color:${dispColor};font-weight:700;">${b.disposition || "—"}</td>
+            <td>${b.quantity_on_hand.toFixed(1)}</td>
             <td>${b.reweighKg || "—"}</td><td>${b.quality}</td><td>${b.location}</td>
             <td>${b.approvedBy || "—"}</td><td>${b.discrepancy || "—"}</td>
           </tr>`;
@@ -2481,13 +2775,17 @@ function PrintReport({ bags, onBack }) {
                       </div>
                       <span style={{
                         fontSize: 10, fontWeight: 700, letterSpacing: 1,
-                        color: bag.status === "altered" ? C.warning : C.pass, textTransform: "uppercase",
+                        color: bag.status === "altered" ? C.warning
+                          : bag.status === "scrap" ? (C.fail || "#ef4444")
+                          : bag.status === "pending" ? "#f59e0b"
+                          : C.pass,
+                        textTransform: "uppercase",
                       }}>{bag.status}</span>
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, fontSize: 11, color: C.textMuted }}>
                       <span>Tag: {bag.scannedTag}</span>
                       <span>Weight: {bag.quantity_on_hand.toFixed(1)} kg</span>
-                      <span>Quality: {bag.quality}</span>
+                      {bag.disposition && <span style={{ fontWeight: 600, color: bag.status === "scrap" ? (C.fail || "#ef4444") : bag.status === "pending" ? "#f59e0b" : C.accent }}>Disposition: {bag.disposition}</span>}
                       <span>Location: {bag.location}</span>
                       <span style={{ color: C.textDim }}>
                         Scanned: {new Date(bag.confirmedAt).toLocaleTimeString()}
