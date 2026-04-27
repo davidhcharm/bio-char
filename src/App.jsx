@@ -2,19 +2,19 @@ import React from "react";
 import { useState, useEffect, useRef, useCallback } from "react";
 
 // ============================================================
-// COLOR PALETTE — Charcoal + Emerald (shifted from D-Series orange)
+// COLOR PALETTE — Light Mode (sunlight-readable)
 // ============================================================
 const C = {
-  bg: "#080c10", bgCard: "#0f1519", bgInput: "#0a0f13", bgSection: "#131a22",
-  border: "#1a2636", borderFocus: "#34d399",
-  text: "#e0e6ed", textMuted: "#6b7d93", textDim: "#3d4f63",
-  accent: "#34d399", accentGlow: "rgba(52,211,153,0.12)",
-  pass: "#2ea043", passGlow: "rgba(46,160,67,0.15)",
-  fail: "#da3633", failGlow: "rgba(218,54,51,0.15)",
-  disabled: "#1a2332", disabledText: "#2d3d50",
-  white: "#fff", warning: "#d29922", warningGlow: "rgba(210,153,34,0.15)",
-  info: "#388bfd", infoGlow: "rgba(56,139,253,0.12)",
-  char: "#8b6914", charGlow: "rgba(139,105,20,0.15)",
+  bg: "#ffffff", bgCard: "#f8f9fa", bgInput: "#ffffff", bgSection: "#f1f3f5",
+  border: "#dee2e6", borderFocus: "#0d9668",
+  text: "#1a1a2e", textMuted: "#6c757d", textDim: "#adb5bd",
+  accent: "#0d9668", accentGlow: "rgba(13,150,104,0.1)",
+  pass: "#198754", passGlow: "rgba(25,135,84,0.1)",
+  fail: "#dc3545", failGlow: "rgba(220,53,69,0.1)",
+  disabled: "#e9ecef", disabledText: "#adb5bd",
+  white: "#fff", warning: "#cc8400", warningGlow: "rgba(204,132,0,0.1)",
+  info: "#0d6efd", infoGlow: "rgba(13,110,253,0.1)",
+  char: "#8b6914", charGlow: "rgba(139,105,20,0.1)",
 };
 
 // ============================================================
@@ -304,7 +304,7 @@ function Notification({ notification }) {
       position: "fixed", top: 20, left: "50%", transform: "translateX(-50%)",
       background: bgMap[notification.type] || C.accent, color: C.white,
       padding: "12px 24px", borderRadius: 12, zIndex: 1000,
-      fontSize: 14, fontWeight: 600, boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+      fontSize: 14, fontWeight: 600, boxShadow: "0 8px 32px rgba(0,0,0,0.15)",
       animation: "slideDown 0.3s ease", maxWidth: "90%", textAlign: "center",
     }}>{notification.msg}</div>
   );
@@ -350,7 +350,7 @@ function ReviewModal({ bagData, isDuplicate, users, onConfirm, onCancel }) {
 
   return (
     <div style={{
-      position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)",
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
       display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
       padding: 20, animation: "fadeIn 0.2s ease",
     }}>
@@ -443,7 +443,7 @@ function ReviewModal({ bagData, isDuplicate, users, onConfirm, onCancel }) {
             display: "flex", alignItems: "center", justifyContent: "center",
             transition: "all 0.2s", flexShrink: 0,
           }}>
-            {reviewed && <span style={{ color: C.bg, fontSize: 14, fontWeight: 900 }}>✓</span>}
+            {reviewed && <span style={{ color: "#fff", fontSize: 14, fontWeight: 900 }}>✓</span>}
           </div>
           <span style={{
             fontSize: 13, fontWeight: 600,
@@ -667,13 +667,14 @@ function AuditScreen({ onPrintReport, users, testMode, onToggleEnvPanel }) {
   timestamp: new Date().toISOString(),
 });
 
-    // Weight threshold check — require re-weigh if suspected wrong units OR if >180 (any bag)
+    // Weight threshold check
+    // suspected_wrong_units (post-Oct 2025 + >180) = BLOCKS submission until confirmed
+    // >180 but pre-Oct 2025 = informational warning only, does NOT block
     if (suspectedWrongUnits) {
       setWeightWarning(true);
       setUnitsLocked(true); // Lock entry until units confirmed or pin override
-    } else if (match.quantity_on_hand > 180) {
-      setWeightWarning(true);
     }
+    // Note: removed the else-if for >180 pre-Oct bags — those can submit as-is
 
     setSelectedQuality("");
     setDiscrepancyNote("");
@@ -1045,7 +1046,7 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
       {/* Location Routing Pop-up — appears after every submission */}
       {locationRouting && (
         <div style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)",
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",
           display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100,
           padding: 20, animation: "fadeIn 0.15s ease",
         }}>
@@ -1095,7 +1096,7 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
                 width: "100%", padding: "18px", border: "none", borderRadius: 12,
                 fontSize: 18, fontWeight: 900, fontFamily: "inherit",
                 letterSpacing: 3, textTransform: "uppercase",
-                background: locationRouting.color, color: C.bg,
+                background: locationRouting.color, color: "#fff",
                 cursor: "pointer", transition: "all 0.2s",
                 boxShadow: `0 4px 20px ${locationRouting.color}44`,
               }}
@@ -1107,7 +1108,7 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
       {/* Not Found Confirmation Modal */}
       {notFoundTag && !showNotFoundForm && (
         <div style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)",
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
           display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
           padding: 20, animation: "fadeIn 0.2s ease",
         }}>
@@ -1147,7 +1148,7 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
               <button onClick={() => setShowNotFoundForm(true)} style={{
                 flex: 2, padding: "14px", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700,
                 fontFamily: "inherit", cursor: "pointer", letterSpacing: 2, textTransform: "uppercase",
-                background: C.warning, color: C.bg,
+                background: C.warning, color: "#fff",
               }}>TAG IS CORRECT →</button>
             </div>
           </div>
@@ -1157,7 +1158,7 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
       {/* Not Found — Create Inventory Form */}
       {notFoundTag && showNotFoundForm && (
         <div style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)",
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
           display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
           padding: 20, animation: "fadeIn 0.2s ease",
         }}>
@@ -1254,7 +1255,7 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
                   position: "absolute", top: "100%", left: 0, right: 0, zIndex: 50,
                   background: C.bgCard, border: `1px solid ${C.border}`, borderRadius: 8,
                   maxHeight: 220, overflowY: "auto", marginTop: 4,
-                  boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+                  boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
                 }}>
                   {(() => {
                     const term = (ppSearchTerm || "").toLowerCase().trim();
@@ -1535,7 +1536,7 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
         borderBottom: `1px solid ${C.border}`, background: C.bgCard,
         position: "sticky", top: 0, zIndex: 100,
       }}>
-        <img src={CHARM_LOGO} alt="" style={{ width: 32, height: 32, filter: "brightness(1.2)", borderRadius: 4 }} />
+        <img src={CHARM_LOGO} alt="" style={{ width: 32, height: 32, borderRadius: 4 }} />
         <div style={{ flex: 1 }}>
           <div className="app-title" style={{ fontSize: 18, fontWeight: 700, color: C.text }}>Bio-Char Inventory Audit</div>
           <div style={{ fontSize: 11, color: C.textMuted, letterSpacing: 2, textTransform: "uppercase" }}>
@@ -1593,7 +1594,7 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
             background: C.bgCard, border: `1px solid ${C.border}`, borderRadius: 12, padding: 20,
             marginBottom: 16,
           }}>
-            <label style={{ fontSize: 11, color: C.textMuted, letterSpacing: 2, textTransform: "uppercase", display: "block", marginBottom: 8 }}>
+            <label style={{ fontSize: 13, color: "#000", fontWeight: 800, letterSpacing: 2, textTransform: "uppercase", display: "block", marginBottom: 8 }}>
               Security Tag / Lot Number
             </label>
             <div style={{ display: "flex", gap: 8 }}>
@@ -1606,13 +1607,13 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
                 placeholder="Enter tag number..."
                 style={{
                   flex: 1, padding: "14px 16px", background: C.bgInput,
-                  border: `1px solid ${duplicateWarning ? C.fail : C.border}`,
-                  borderRadius: 8, color: C.text, fontSize: 16, fontFamily: "inherit",
-                  outline: "none", letterSpacing: 2,
+                  border: `2px solid ${duplicateWarning ? C.fail : C.border}`,
+                  borderRadius: 8, color: "#000", fontSize: 18, fontWeight: 700, fontFamily: "'JetBrains Mono',monospace",
+                  outline: "none", letterSpacing: 3,
                 }}
               />
               <button onClick={handleScanTag} style={{
-                padding: "14px 24px", background: C.accent, color: C.bg, border: "none",
+                padding: "14px 24px", background: C.accent, color: "#fff", border: "none",
                 borderRadius: 8, fontSize: 14, fontWeight: 700, fontFamily: "inherit", cursor: "pointer",
                 letterSpacing: 1,
               }}>ENTER</button>
@@ -1958,7 +1959,7 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
                       }} style={{
                         padding: "12px 24px", borderRadius: 8, fontSize: 14, fontWeight: 700,
                         fontFamily: "inherit", cursor: "pointer", letterSpacing: 1,
-                        background: C.accent, color: "#000", border: "none",
+                        background: C.accent, color: "#fff", border: "none",
                       }}>✓ YES — UNITS ARE CORRECT (KG)</button>
 
                       <button onClick={() => {
@@ -2011,7 +2012,7 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
                           }} style={{
                             padding: "10px 20px", borderRadius: 8, fontSize: 14, fontWeight: 700,
                             fontFamily: "inherit", cursor: "pointer",
-                            background: C.warning, color: "#000", border: "none",
+                            background: C.warning, color: "#fff", border: "none",
                           }}>UNLOCK</button>
                         </div>
                       </div>
@@ -2340,7 +2341,7 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
                     }
                   }} style={{
                     padding: "12px", background: C.accent, border: "none", borderRadius: 10,
-                    color: "#000", fontSize: 13, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", letterSpacing: 1,
+                    color: "#fff", fontSize: 13, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", letterSpacing: 1,
                   }}>▶ SUBMIT ALL</button>
                   <button onClick={() => {
                     const pendingCount = getLocalQueue().filter(q => q._meta?.status === "pending").length;
@@ -2504,7 +2505,7 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
               ))}
               <button onClick={() => onPrintReport(scannedBags)} style={{
                 width: "100%", padding: "14px", marginTop: 8, background: C.accent,
-                border: "none", borderRadius: 10, color: C.bg,
+                border: "none", borderRadius: 10, color: "#fff",
                 fontSize: 14, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", letterSpacing: 2,
               }}>🖨 GENERATE PRINTOUT</button>
             </>
@@ -2873,7 +2874,7 @@ export default function App() {
       {/* Environment Toggle Panel — opened by tapping version badge */}
       {showEnvPanel && (
         <div style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)",
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
           display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2000,
           padding: 20, animation: "fadeIn 0.15s ease",
         }}>
