@@ -989,6 +989,7 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
       prod_code: "bio_char",
       quantity_on_hand: weightKg,
       location: newBagLocation,
+      disposition: STORAGE_LOCATIONS.find(l => l.code === newBagLocation)?.label || newBagLocation,
       production_date: productionDate,
       scannedTag: notFoundTag,
       quality: newBagQuality,
