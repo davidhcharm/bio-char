@@ -1241,7 +1241,14 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
                     setNewBagLocation(CEMENT_TRIAL_PPS.includes(exactMatch.id) ? "Non-AG" : "AG");
                   }
                 }}
-                onFocus={() => setShowPpDropdown(true)}
+                onFocus={() => {
+                  // Clear existing selection so user can search fresh
+                  if (newBagPP) {
+                    setNewBagPP("");
+                    setPpSearchTerm("");
+                  }
+                  setShowPpDropdown(true);
+                }}
                 placeholder="Enter Ops ID (e.g. 2604)..."
                 style={{
                   width: "100%", padding: "12px 14px", background: C.bgInput,
@@ -1269,7 +1276,7 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
                     if (filtered.length === 0) return (
                       <div style={{ padding: "12px 14px", color: C.textDim, fontSize: 13 }}>No matching Ops ID</div>
                     );
-                    return filtered.slice(0, 12).map(pp => {
+                    return filtered.map(pp => {
                       const colors = PP_COLORS[pp.color];
                       return (
                         <div key={pp.id} onClick={() => {
