@@ -2736,6 +2736,24 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
             cursor: "pointer", letterSpacing: 1,
           }}>📤 SYNC LOCAL SCANS → DATABASE (one-time, deduped by lot)</button>
 
+          {/* Debug: show localStorage keys */}
+          <button onClick={() => {
+            const keys = Object.keys(localStorage).filter(k => k.includes("biochar"));
+            const info = keys.map(k => {
+              try {
+                const val = JSON.parse(localStorage.getItem(k));
+                return `${k}: ${Array.isArray(val) ? val.length + " items" : typeof val}`;
+              } catch {
+                return `${k}: (not JSON)`;
+              }
+            });
+            alert("localStorage biochar keys:\n\n" + (info.length > 0 ? info.join("\n") : "No biochar keys found"));
+          }} style={{
+            width: "100%", padding: "8px", marginBottom: 16,
+            background: "transparent", border: `1px dashed ${C.textDim}`, borderRadius: 8,
+            color: C.textDim, fontSize: 10, fontFamily: "inherit", cursor: "pointer",
+          }}>🔍 DEBUG: Show localStorage keys</button>
+
           {/* Filter bar */}
           <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
             {[
