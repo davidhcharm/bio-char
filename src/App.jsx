@@ -2663,11 +2663,16 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
             // Gather all local scans from localStorage
             const localKey = "biochar_session_bags";
             let allLocal = [];
-            try { allLocal = JSON.parse(localStorage.getItem(localKey) || "[]"); } catch {}
-            if (allLocal.length === 0) {
-              showNotif("No local scans to sync", "info");
+            try { allLocal = JSON.parse(localStorage.getItem(localKey) || "[]"); } catch (e) {
+              alert("Error reading localStorage: " + e.message);
               return;
             }
+            if (allLocal.length === 0) {
+              alert("No local scans found in '" + localKey + "'");
+              return;
+            }
+
+            alert("Found " + allLocal.length + " local scans. Deduplicating by lot...");
 
             // Deduplicate by lot_number — keep only the most recent entry per lot
             const byLot = {};
@@ -2681,54 +2686,70 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
             }
             const dedupedBags = Object.values(byLot).map(v => v.bag);
 
+            alert("After dedup: " + dedupedBags.length + " unique lots. Checking DB for existing...");
+
             // Check which lots already exist in the DB to avoid overwriting newer DB entries
             setDbLoading(true);
-            const existingScans = await fetchScansFromDb({ limit: 1000 });
+            let existingScans = [];
+            try {
+              existingScans = await fetchScansFromDb({ limit: 1000 });
+              alert("DB has " + existingScans.length + " existing scans. Starting upload...");
+            } catch (e) {
+              alert("Error fetching DB: " + e.message);
+              setDbLoading(false);
+              return;
+            }
             const existingLots = new Set(existingScans.map(s => s.lot_number));
 
             let synced = 0;
             let skipped = 0;
+            let errors = 0;
             for (const bag of dedupedBags) {
               const lot = bag.lot_number || bag.scannedTag;
-              // Skip if already in DB — DB version is authoritative after first sync
+              // Skip if already in DB
               if (existingLots.has(lot)) {
                 skipped++;
                 continue;
               }
 
               const scanId = bag.scan_id || generateScanId();
-              await saveScanToDb({
-                scan_id: scanId,
-                session_id: bag.session_id || "legacy_sync",
-                device_id: bag.device_id || getDeviceId(),
-                lot_number: lot,
-                scanned_tag: bag.scannedTag || lot,
-                prod_code: bag.prod_code || "bio_char",
-                quantity_on_hand: bag.quantity_on_hand,
-                quantity_original: bag.quantity_original,
-                reweigh_kg: bag.reweighKg,
-                units_confirmed: bag.units_confirmed || false,
-                quality: bag.quality,
-                char_type: bag.char_type,
-                disposition: bag.disposition,
-                status: bag.status || "reported",
-                location: bag.location,
-                location_code: bag.location_code,
-                production_date: bag.production_date,
-                discrepancy: bag.discrepancy,
-                notes: bag.notes,
-                approved_by: bag.approvedBy,
-                is_new: bag.isNew || false,
-                confirmed_at: bag.confirmedAt,
-              });
-              synced++;
+              try {
+                const ok = await saveScanToDb({
+                  scan_id: scanId,
+                  session_id: bag.session_id || "legacy_sync",
+                  device_id: bag.device_id || getDeviceId(),
+                  lot_number: lot,
+                  scanned_tag: bag.scannedTag || lot,
+                  prod_code: bag.prod_code || "bio_char",
+                  quantity_on_hand: bag.quantity_on_hand,
+                  quantity_original: bag.quantity_original,
+                  reweigh_kg: bag.reweighKg,
+                  units_confirmed: bag.units_confirmed || false,
+                  quality: bag.quality,
+                  char_type: bag.char_type,
+                  disposition: bag.disposition,
+                  status: bag.status || "reported",
+                  location: bag.location,
+                  location_code: bag.location_code,
+                  production_date: bag.production_date,
+                  discrepancy: bag.discrepancy,
+                  notes: bag.notes,
+                  approved_by: bag.approvedBy,
+                  is_new: bag.isNew || false,
+                  confirmed_at: bag.confirmedAt,
+                });
+                if (ok) synced++;
+                else errors++;
+              } catch (e) {
+                errors++;
+              }
             }
 
             // Refresh the DB view
             const refreshed = await fetchScansFromDb({ limit: 500 });
             setDbScans(refreshed);
             setDbLoading(false);
-            showNotif(`✓ Synced ${synced} new scan${synced !== 1 ? "s" : ""} to DB (${skipped} already existed)`, "success");
+            alert("DONE!\nSynced: " + synced + "\nSkipped (already in DB): " + skipped + "\nErrors: " + errors + "\nDB now has: " + refreshed.length + " scans");
           }} style={{
             width: "100%", padding: "10px", marginBottom: 16,
             background: C.bgSection, border: `1px dashed ${C.info}`, borderRadius: 8,
