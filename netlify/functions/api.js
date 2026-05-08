@@ -62,6 +62,14 @@ const ROUTES = {
   checkDuplicate:   { type: 'workflow', action: 'checkDuplicate' },
   getData:          { type: 'workflow', action: 'getData' },
 
+  // Audit scan CRUD via Retool Workflow (shared across devices)
+  auditSaveScan:    { type: 'workflow', action: 'auditSaveScan' },
+  auditSaveBatch:   { type: 'workflow', action: 'auditSaveBatch' },
+  auditGetScans:    { type: 'workflow', action: 'auditGetScans' },
+  auditUpdateScan:  { type: 'workflow', action: 'auditUpdateScan' },
+  auditDeleteScan:  { type: 'workflow', action: 'auditDeleteScan' },
+  auditGetSessions: { type: 'workflow', action: 'auditGetSessions' },
+
   // Inventory adjustments via Retool Workflow (goes through adjustRouter → callManufacturo in workflow)
   adjustViaWorkflow: { type: 'workflow', action: 'adjust' },
 
