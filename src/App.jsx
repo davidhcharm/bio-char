@@ -2661,7 +2661,7 @@ adjustPayload.productRevision = _siteCode === "CHARM_TEST" ? "NA" : "A";
           {/* One-time sync: push local scans to DB, deduped by lot_number (most recent wins) */}
           <button onClick={async () => {
             // Gather all local scans from localStorage
-            const localKey = "biochar_scanned_bags";
+            const localKey = "biochar_session_bags";
             let allLocal = [];
             try { allLocal = JSON.parse(localStorage.getItem(localKey) || "[]"); } catch {}
             if (allLocal.length === 0) {
